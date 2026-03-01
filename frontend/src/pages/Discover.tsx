@@ -1,12 +1,15 @@
-import { getTasteMatches, albums, allSongs } from "@/data/mockData";
+import { getTasteMatches, albums } from "@/data/mockData";
 import { useReviewStore } from "@/stores/reviewStore";
 import { TasteMatchCard } from "@/components/TasteMatchCard";
 import { ReviewCard } from "@/components/ReviewCard";
 import { AlbumCard } from "@/components/AlbumCard";
 import { Search, Music, Activity, Mic2 } from "lucide-react";
-import { useState } from "react";
-import { MatchMode } from "@/types/music";
+import { useEffect, useState } from "react";
+import { MatchMode, Song } from "@/types/music";
 import { cn } from "@/lib/utils";
+import { Link } from "react-router-dom";
+
+const SONG_PAGE_SIZE = 5;
 
 const matchTabs: { mode: MatchMode; label: string; icon: typeof Music; description: string }[] = [
   { mode: "top5", label: "Top 5", icon: Music, description: "Based on shared Top 5 songs" },
@@ -18,22 +21,116 @@ export default function Discover() {
   const reviews = useReviewStore((s) => s.reviews);
   const [search, setSearch] = useState("");
   const [matchMode, setMatchMode] = useState<MatchMode>("top5");
+  const [searchedSongs, setSearchedSongs] = useState<Song[]>([]);
+  const [isSearchingSongs, setIsSearchingSongs] = useState(false);
+  const [isLoadingMoreSongs, setIsLoadingMoreSongs] = useState(false);
+  const [songSearchError, setSongSearchError] = useState<string | null>(null);
+  const [songTotalCount, setSongTotalCount] = useState(0);
 
   const matches = getTasteMatches(matchMode);
+  const searchQuery = search.trim();
 
-  const filteredAlbums = albums.filter(
-    (a) =>
-      a.title.toLowerCase().includes(search.toLowerCase()) ||
-      a.artist.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const filteredSongs = search
-    ? allSongs.filter(
-        (s) =>
-          s.title.toLowerCase().includes(search.toLowerCase()) ||
-          s.artist.toLowerCase().includes(search.toLowerCase())
+  const filteredAlbums = searchQuery
+    ? albums.filter(
+        (a) =>
+          a.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          a.artist.toLowerCase().includes(searchQuery.toLowerCase())
       )
     : [];
+
+  useEffect(() => {
+    if (searchQuery.length < 2) {
+      setSearchedSongs([]);
+      setIsSearchingSongs(false);
+      setIsLoadingMoreSongs(false);
+      setSongSearchError(null);
+      setSongTotalCount(0);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      setIsSearchingSongs(true);
+      setSongSearchError(null);
+
+      try {
+        const response = await fetch(
+          `/api/search?q=${encodeURIComponent(searchQuery)}&type=track&limit=${SONG_PAGE_SIZE}&offset=0`,
+          { signal: controller.signal }
+        );
+
+        if (!response.ok) {
+          throw new Error("Spotify search failed");
+        }
+
+        const data = await response.json();
+        setSearchedSongs(Array.isArray(data.tracks) ? data.tracks : []);
+        setSongTotalCount(
+          typeof data.trackPagination?.total === "number"
+            ? data.trackPagination.total
+            : Array.isArray(data.tracks)
+              ? data.tracks.length
+              : 0
+        );
+      } catch {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setSearchedSongs([]);
+        setSongTotalCount(0);
+        setSongSearchError("Unable to load Spotify song results right now.");
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSearchingSongs(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeoutId);
+    };
+  }, [searchQuery]);
+
+  async function handleLoadMoreSongs() {
+    if (isLoadingMoreSongs || searchedSongs.length >= songTotalCount) {
+      return;
+    }
+
+    setIsLoadingMoreSongs(true);
+    setSongSearchError(null);
+
+    try {
+      const response = await fetch(
+        `/api/search?q=${encodeURIComponent(searchQuery)}&type=track&limit=${SONG_PAGE_SIZE}&offset=${searchedSongs.length}`
+      );
+
+      if (!response.ok) {
+        throw new Error("Spotify search failed");
+      }
+
+      const data = await response.json();
+      const nextSongs = Array.isArray(data.tracks) ? data.tracks : [];
+
+      setSearchedSongs((currentSongs) => {
+        const seenIds = new Set(currentSongs.map((song) => song.id));
+        const uniqueNextSongs = nextSongs.filter((song: Song) => !seenIds.has(song.id));
+        return [...currentSongs, ...uniqueNextSongs];
+      });
+      setSongTotalCount(
+        typeof data.trackPagination?.total === "number"
+          ? data.trackPagination.total
+          : searchedSongs.length + nextSongs.length
+      );
+    } catch {
+      setSongSearchError("Unable to load more Spotify songs right now.");
+    } finally {
+      setIsLoadingMoreSongs(false);
+    }
+  }
+
+  const hasMoreSongs = searchedSongs.length > 0 && searchedSongs.length < songTotalCount;
 
   return (
     <div className="container py-10 max-w-5xl">
@@ -50,23 +147,49 @@ export default function Discover() {
       </div>
 
       {/* Search results */}
-      {search && (
+      {searchQuery && (
         <section className="mb-10">
           <h2 className="font-display text-xl font-bold mb-4">Search Results</h2>
-          {filteredSongs.length > 0 && (
+          {isSearchingSongs && (
+            <p className="text-sm text-muted-foreground mb-6">Searching Spotify songs...</p>
+          )}
+          {songSearchError && (
+            <p className="text-sm text-destructive mb-6">{songSearchError}</p>
+          )}
+          {searchedSongs.length > 0 && (
             <div className="mb-6">
               <h3 className="text-sm font-semibold text-muted-foreground mb-3">Songs</h3>
               <div className="grid gap-2">
-                {filteredSongs.slice(0, 5).map((song) => (
-                  <div key={song.id} className="flex items-center gap-3 rounded-lg bg-card border border-border p-3">
+                {searchedSongs.map((song) => (
+                  <Link
+                    key={song.id}
+                    to={`/song/${song.id}`}
+                    className="flex items-center gap-3 rounded-lg bg-card border border-border p-3 hover:bg-secondary/40 transition-colors"
+                  >
                     <img src={song.coverUrl} alt={song.albumTitle} className="h-10 w-10 rounded object-cover" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{song.title}</p>
-                      <p className="text-xs text-muted-foreground">{song.artist}</p>
+                      <p className="text-xs text-muted-foreground truncate">{song.artist}</p>
+                      <p className="text-xs text-muted-foreground truncate">{song.albumTitle}</p>
                     </div>
                     <span className="text-xs text-muted-foreground">{song.duration}</span>
-                  </div>
+                  </Link>
                 ))}
+              </div>
+              <div className="mt-4 flex items-center justify-between gap-4">
+                <p className="text-xs text-muted-foreground">
+                  Showing {searchedSongs.length} of {songTotalCount || searchedSongs.length} matching songs
+                </p>
+                {hasMoreSongs && (
+                  <button
+                    type="button"
+                    onClick={handleLoadMoreSongs}
+                    disabled={isLoadingMoreSongs}
+                    className="rounded-lg border border-border px-4 py-2 text-sm font-medium transition-colors hover:bg-secondary/50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isLoadingMoreSongs ? "Loading..." : "See more songs"}
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -78,7 +201,10 @@ export default function Discover() {
               </div>
             </div>
           )}
-          {filteredAlbums.length === 0 && filteredSongs.length === 0 && (
+          {!isSearchingSongs && !songSearchError && searchQuery.length >= 2 && searchedSongs.length === 0 && filteredAlbums.length > 0 && (
+            <p className="text-muted-foreground text-sm mb-6">No Spotify songs found.</p>
+          )}
+          {filteredAlbums.length === 0 && searchedSongs.length === 0 && !isSearchingSongs && !songSearchError && searchQuery.length >= 2 && (
             <p className="text-muted-foreground text-sm">No results found.</p>
           )}
         </section>
@@ -111,13 +237,19 @@ export default function Discover() {
           {matchTabs.find((t) => t.mode === matchMode)?.description}
         </p>
 
-        <div className="grid gap-4">
-          {matches.map((match, i) => (
-            <div key={match.user.id} className="animate-fade-in" style={{ animationDelay: `${i * 100}ms` }}>
-              <TasteMatchCard match={match} />
-            </div>
-          ))}
-        </div>
+        {matches.length > 0 ? (
+          <div className="grid gap-4">
+            {matches.map((match, i) => (
+              <div key={match.user.id} className="animate-fade-in" style={{ animationDelay: `${i * 100}ms` }}>
+                <TasteMatchCard match={match} />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-border bg-card/40 p-5 text-sm text-muted-foreground">
+            Taste matches will appear after user profiles and listening history are stored in Mongo.
+          </div>
+        )}
       </section>
 
       {/* Recent Community Activity */}

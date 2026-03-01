@@ -15,7 +15,7 @@ export default function ArtistDetail() {
   if (artistAlbums.length === 0 && artistSongs.length === 0) {
     return (
       <div className="container py-20 text-center">
-        <p className="text-muted-foreground">Artist not found.</p>
+        <p className="text-muted-foreground">Artist data will appear here once Spotify artist data is connected.</p>
         <Link to="/" className="text-primary text-sm mt-2 inline-block hover:underline">Go home</Link>
       </div>
     );

@@ -7,6 +7,8 @@ export interface Song {
   coverUrl: string;
   duration: string;
   rating?: number;
+  previewUrl?: string | null;
+  spotifyUrl?: string | null;
 }
 
 export interface Album {
@@ -38,8 +40,12 @@ export interface UserProfile {
   favoriteArtists: string[];
   recentAlbumIds: string[];
   totalRatings: number;
-  joinedDate: string;
-  profileColor?: string;
+  joinedDate: string | null;
+  profileColor?: string | null;
+}
+
+export interface AuthenticatedUser extends UserProfile {
+  email: string;
 }
 
 export type MatchMode = "top5" | "activity" | "artists";
@@ -59,6 +65,7 @@ export interface Review {
   username: string;
   avatarUrl: string;
   albumId: string;
+  songId?: string | null;
   albumTitle: string;
   albumCover: string;
   artist: string;

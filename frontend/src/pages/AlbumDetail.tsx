@@ -12,12 +12,12 @@ export default function AlbumDetail() {
   const album = albums.find((a) => a.id === id);
   const [userRating, setUserRating] = useState(0);
   const reviews = useReviewStore((s) => s.reviews);
-  const albumReviews = reviews.filter((r) => r.albumId === id);
+  const albumReviews = reviews.filter((r) => r.albumId === id && !r.songId);
 
   if (!album) {
     return (
       <div className="container py-20 text-center">
-        <p className="text-muted-foreground">Album not found.</p>
+        <p className="text-muted-foreground">Album data will appear here once Spotify album syncing is connected.</p>
         <Link to="/" className="text-primary text-sm mt-2 inline-block hover:underline">Go home</Link>
       </div>
     );

@@ -3,15 +3,17 @@ import { RatingStars } from "./RatingStars";
 import { Link } from "react-router-dom";
 
 export function ReviewCard({ review }: { review: Review }) {
+  const detailLink = review.songId ? `/song/${review.songId}` : `/album/${review.albumId}`;
+
   return (
     <div className="flex gap-4 rounded-xl bg-card p-4 border border-border card-hover">
-      <Link to={`/album/${review.albumId}`} className="shrink-0">
+      <Link to={detailLink} className="shrink-0">
         <img src={review.albumCover} alt={review.albumTitle} className="h-20 w-20 rounded-lg object-cover" />
       </Link>
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <Link to={`/album/${review.albumId}`} className="font-semibold text-sm hover:text-primary transition-colors truncate block">
+            <Link to={detailLink} className="font-semibold text-sm hover:text-primary transition-colors truncate block">
               {review.albumTitle}
             </Link>
             <Link to={`/artist/${encodeURIComponent(review.artist)}`} className="text-xs text-muted-foreground hover:text-primary transition-colors">
