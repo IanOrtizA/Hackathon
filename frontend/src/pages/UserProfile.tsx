@@ -6,6 +6,7 @@ import { ReviewCard } from "@/components/ReviewCard";
 import { useReviewStore } from "@/stores/reviewStore";
 import { useAuth } from "@/contexts/AuthContext";
 import { AuthenticatedUser } from "@/types/music";
+import { apiUrl } from "@/lib/api";
 
 export default function UserProfile() {
   const { id } = useParams();
@@ -36,7 +37,7 @@ export default function UserProfile() {
 
     void (async () => {
       try {
-        const response = await fetch(`/api/users/${encodeURIComponent(id)}`, {
+        const response = await fetch(apiUrl(`/api/users/${encodeURIComponent(id)}`), {
           signal: controller.signal,
         });
         const data = await response.json().catch(() => ({}));

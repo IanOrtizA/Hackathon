@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { AuthenticatedUser } from "@/types/music";
+import { apiUrl } from "@/lib/api";
 
 const AUTH_TOKEN_STORAGE_KEY = "musicbox.auth.token";
 
@@ -78,7 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const fetchCurrentUser = useCallback(async (authToken: string) => {
-    const response = await fetch("/api/auth/me", {
+    const response = await fetch(apiUrl("/api/auth/me"), {
       headers: {
         Authorization: `Bearer ${authToken}`,
       },
@@ -110,7 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [fetchCurrentUser, persistAuth]);
 
   const register = useCallback(async (input: RegisterInput) => {
-    const response = await fetch("/api/auth/register", {
+    const response = await fetch(apiUrl("/api/auth/register"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -123,7 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [persistAuth]);
 
   const login = useCallback(async (input: LoginInput) => {
-    const response = await fetch("/api/auth/login", {
+    const response = await fetch(apiUrl("/api/auth/login"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -152,7 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error("Not authenticated.");
     }
 
-    const response = await fetch("/api/auth/profile", {
+    const response = await fetch(apiUrl("/api/auth/profile"), {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",

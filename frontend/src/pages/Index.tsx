@@ -4,6 +4,7 @@ import heroBg from "@/assets/hero-bg.jpg";
 import { useEffect, useState } from "react";
 import { Song } from "@/types/music";
 import { Link } from "react-router-dom";
+import { apiUrl } from "@/lib/api";
 
 interface TrendingAlbum {
   id: string;
@@ -29,7 +30,7 @@ const Index = () => {
       setTrendingError(null);
 
       try {
-        const response = await fetch("/api/trending", {
+        const response = await fetch(apiUrl("/api/trending"), {
           signal: controller.signal,
         });
         const data = await response.json().catch(() => ({}));

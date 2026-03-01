@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { MatchMode, Song } from "@/types/music";
 import { cn } from "@/lib/utils";
 import { Link } from "react-router-dom";
+import { apiUrl } from "@/lib/api";
 
 const SONG_PAGE_SIZE = 5;
 
@@ -55,7 +56,7 @@ export default function Discover() {
 
       try {
         const response = await fetch(
-          `/api/search?q=${encodeURIComponent(searchQuery)}&type=track&limit=${SONG_PAGE_SIZE}&offset=0`,
+          apiUrl(`/api/search?q=${encodeURIComponent(searchQuery)}&type=track&limit=${SONG_PAGE_SIZE}&offset=0`),
           { signal: controller.signal }
         );
 
@@ -103,7 +104,7 @@ export default function Discover() {
 
     try {
       const response = await fetch(
-        `/api/search?q=${encodeURIComponent(searchQuery)}&type=track&limit=${SONG_PAGE_SIZE}&offset=${searchedSongs.length}`
+        apiUrl(`/api/search?q=${encodeURIComponent(searchQuery)}&type=track&limit=${SONG_PAGE_SIZE}&offset=${searchedSongs.length}`)
       );
 
       if (!response.ok) {

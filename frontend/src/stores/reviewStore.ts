@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { Review } from "@/types/music";
+import { apiUrl } from "@/lib/api";
 
 interface ReviewFilters {
   albumId?: string;
@@ -65,7 +66,7 @@ export const useReviewStore = create<ReviewStore>((set) => ({
     }
 
     try {
-      const response = await fetch(`/api/reviews${buildReviewQuery(filters)}`);
+      const response = await fetch(apiUrl(`/api/reviews${buildReviewQuery(filters)}`));
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
@@ -91,7 +92,7 @@ export const useReviewStore = create<ReviewStore>((set) => ({
     }
   },
   addReview: async (review, authToken) => {
-    const response = await fetch("/api/reviews", {
+    const response = await fetch(apiUrl("/api/reviews"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

@@ -7,6 +7,7 @@ import { useReviewStore } from "@/stores/reviewStore";
 import { ArrowLeft, Clock, ExternalLink, Music } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Song } from "@/types/music";
+import { apiUrl } from "@/lib/api";
 
 export default function SongDetail() {
   const { id } = useParams();
@@ -39,7 +40,7 @@ export default function SongDetail() {
       setSongError(null);
 
       try {
-        const response = await fetch(`/api/tracks/${encodeURIComponent(id)}`, {
+        const response = await fetch(apiUrl(`/api/tracks/${encodeURIComponent(id)}`), {
           signal: controller.signal,
         });
 
