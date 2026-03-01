@@ -1,0 +1,111 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 20% 7%;
+    --foreground: 40 20% 92%;
+
+    --card: 220 18% 10%;
+    --card-foreground: 40 20% 92%;
+
+    --popover: 220 18% 10%;
+    --popover-foreground: 40 20% 92%;
+
+    --primary: 36 90% 55%;
+    --primary-foreground: 220 20% 7%;
+
+    --secondary: 220 15% 16%;
+    --secondary-foreground: 40 15% 80%;
+
+    --muted: 220 15% 14%;
+    --muted-foreground: 220 10% 50%;
+
+    --accent: 36 70% 45%;
+    --accent-foreground: 220 20% 7%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 220 15% 18%;
+    --input: 220 15% 18%;
+    --ring: 36 90% 55%;
+
+    --radius: 0.5rem;
+
+    --chart-1: 36 90% 55%;
+    --chart-2: 200 60% 50%;
+    --chart-3: 150 50% 45%;
+    --chart-4: 280 50% 55%;
+    --chart-5: 0 60% 55%;
+
+    --sidebar-background: 220 20% 7%;
+    --sidebar-foreground: 40 20% 92%;
+    --sidebar-primary: 36 90% 55%;
+    --sidebar-primary-foreground: 220 20% 7%;
+    --sidebar-accent: 220 15% 16%;
+    --sidebar-accent-foreground: 40 20% 92%;
+    --sidebar-border: 220 15% 18%;
+    --sidebar-ring: 36 90% 55%;
+
+    /* Custom tokens */
+    --glow: 36 90% 55%;
+    --surface: 220 16% 12%;
+    --surface-hover: 220 15% 16%;
+    --star-filled: 36 90% 55%;
+    --star-empty: 220 12% 25%;
+    --match-high: 150 60% 45%;
+    --match-medium: 36 90% 55%;
+    --match-low: 220 10% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Playfair Display', serif;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: 'Playfair Display', serif;
+  }
+
+  .font-body {
+    font-family: 'Inter', sans-serif;
+  }
+
+  .text-gradient {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, hsl(36 90% 55%), hsl(36 70% 70%));
+  }
+
+  .glow-sm {
+    box-shadow: 0 0 15px -3px hsl(36 90% 55% / 0.2);
+  }
+
+  .glow-md {
+    box-shadow: 0 0 30px -5px hsl(36 90% 55% / 0.3);
+  }
+
+  .card-hover {
+    @apply transition-all duration-300 ease-out;
+  }
+
+  .card-hover:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 40px -10px hsl(36 90% 55% / 0.15);
+  }
+}
