@@ -347,6 +347,123 @@ async function generateGenreTags(reviewText, artist, albumTitle) {
   }
 }
 
+function getGeminiApiKey() {
+  return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
+}
+
+function extractGeminiText(payload) {
+  const parts = payload?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) {
+    return '';
+  }
+
+  return parts
+    .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+    .join('')
+    .trim();
+}
+
+function buildMusicJourneyStoryFallback(journey) {
+  const normalizedJourney = String(journey || '').replace(/\s+/g, ' ').trim();
+  const excerpt = normalizedJourney.length > 220
+    ? `${normalizedJourney.slice(0, 217)}...`
+    : normalizedJourney;
+
+  return [
+    `It starts quietly: a life measured in songs, in small private rituals, in the albums that stayed when other things changed. ${excerpt} In that story, music is not background noise. It is memory with rhythm, a way of naming seasons of growth, grief, and becoming without having to explain every wound out loud.`,
+    `Another version of this journey feels like learning yourself in layers. Certain artists arrive first as comfort, then return later as mirrors, reflecting who you were and who you are still trying to become. The deeper truth is simple: your taste has been building an emotional map, turning scattered moments into something coherent, intimate, and lasting.`,
+    `The most moving part is not just what you listened to, but how faithfully music kept pace with your life. It held joy without making it shallow and held sadness without making it collapse. Over time, your listening history became a kind of autobiography: concise, imperfect, and deeply human, but unmistakably yours.`,
+  ];
+}
+
+async function generateMusicJourneyStories(journey) {
+  const fallbackStories = buildMusicJourneyStoryFallback(journey);
+  const apiKey = getGeminiApiKey();
+
+  if (!apiKey) {
+    return fallbackStories;
+  }
+
+  try {
+    const prompt = `Write exactly 3 short, heartfelt stories inspired by the following music journey.
+
+Requirements:
+- Each story should be emotionally intelligent, warm, and reflective.
+- Each story should be concise but deep, roughly 60 to 95 words.
+- No titles, no numbering, no bullet points inside the stories.
+- Make each story distinct in emotional angle.
+- Return strict JSON with this exact shape: {"stories":["story one","story two","story three"]}.
+
+Music journey:
+${journey}`;
+
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: prompt,
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.9,
+          responseMimeType: 'application/json',
+        },
+      }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data?.error?.message || 'Gemini story generation failed.');
+    }
+
+    let responseText = extractGeminiText(data);
+    if (!responseText) {
+      return fallbackStories;
+    }
+
+    responseText = responseText.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim();
+
+    let parsed;
+    try {
+      parsed = JSON.parse(responseText);
+    } catch {
+      return fallbackStories;
+    }
+
+    const storyCandidates = Array.isArray(parsed)
+      ? parsed
+      : (Array.isArray(parsed?.stories) ? parsed.stories : []);
+
+    const normalizedStories = storyCandidates
+      .filter((story) => typeof story === 'string' && story.trim())
+      .map((story) => story.trim())
+      .slice(0, 3);
+
+    if (normalizedStories.length === 0) {
+      return fallbackStories;
+    }
+
+    while (normalizedStories.length < 3) {
+      normalizedStories.push(fallbackStories[normalizedStories.length]);
+    }
+
+    return normalizedStories;
+  } catch (error) {
+    console.error('Gemini story generation error:', error.message);
+    return fallbackStories;
+  }
+}
+
 async function rebuildSongAggregate(songId) {
   const reviews = await Review.find({ songId });
 
@@ -1231,6 +1348,27 @@ async function findTrendingTracks(accessToken) {
   }
 }
 
+app.post('/api/top-stories', async (req, res) => {
+  const journey = String(req.body.journey || '').trim();
+
+  if (journey.length < 20) {
+    return res.status(400).json({ error: 'Share a bit more about your music journey.' });
+  }
+
+  if (journey.length > 4000) {
+    return res.status(400).json({ error: 'Keep your music journey under 4000 characters.' });
+  }
+
+  try {
+    const stories = await generateMusicJourneyStories(journey);
+    return res.json({ stories });
+  } catch (error) {
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to generate stories.',
+    });
+  }
+});
+
 app.post('/api/auth/register', async (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   const username = String(req.body.username || '').trim().toLowerCase();
@@ -1688,6 +1826,28 @@ app.get('/api/trending', async (req, res) => {
 
       albums = albumsResult.status === 'fulfilled' ? albumsResult.value : [];
       tracks = tracksResult.status === 'fulfilled' ? tracksResult.value : [];
+    }
+
+    if (albums.length === 0) {
+      try {
+        albums = await findTrendingAlbums(accessToken);
+        if (albums.length > 0 && source !== 'fallback-search') {
+          source = `${source} + fallback albums`;
+        }
+      } catch {
+        // Preserve any tracks we already have; the route can still succeed with partial data.
+      }
+    }
+
+    if (tracks.length === 0) {
+      try {
+        tracks = await findTrendingTracks(accessToken);
+        if (tracks.length > 0 && source !== 'fallback-search') {
+          source = `${source} + fallback tracks`;
+        }
+      } catch {
+        // Preserve any albums we already have; the route can still succeed with partial data.
+      }
     }
 
     if (albums.length === 0 && tracks.length === 0) {

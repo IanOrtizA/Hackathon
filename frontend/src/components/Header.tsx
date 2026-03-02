@@ -1,11 +1,13 @@
 import { Link, useLocation } from "react-router-dom";
-import { MessageSquareText, Music, User, Compass, LogOut } from "lucide-react";
+import { MessageSquareText, Music, User, Compass, LogOut, Sparkles, BookOpenText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 
 const navItems = [
   { to: "/", label: "Home", icon: Music },
   { to: "/discover", label: "Discover", icon: Compass },
+  { to: "/match", label: "Match", icon: Sparkles },
+  { to: "/top-stories", label: "Top Stories", icon: BookOpenText },
   { to: "/top-comments", label: "Leaderboard", icon: MessageSquareText },
 ];
 

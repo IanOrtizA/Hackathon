@@ -10,6 +10,8 @@ import Index from "./pages/Index";
 import Profile from "./pages/Profile";
 import LikedSongs from "./pages/LikedSongs";
 import Discover from "./pages/Discover";
+import Match from "./pages/Match";
+import TopStories from "./pages/TopStories";
 import TopComments from "./pages/TopComments";
 import AlbumDetail from "./pages/AlbumDetail";
 import ArtistDetail from "./pages/ArtistDetail";
@@ -44,6 +46,8 @@ const App = () => {
             <Route path="/profile" element={<Profile />} />
             <Route path="/profile/liked-songs" element={<LikedSongs />} />
             <Route path="/discover" element={<Discover />} />
+            <Route path="/match" element={<Match />} />
+            <Route path="/top-stories" element={<TopStories />} />
             <Route path="/top-comments" element={<TopComments />} />
             <Route path="/album/:id" element={<AlbumDetail />} />
             <Route path="/artist/:name" element={<ArtistDetail />} />

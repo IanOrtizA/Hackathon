@@ -5,37 +5,152 @@ import { useEffect, useState } from "react";
 import { Song } from "@/types/music";
 import { Link } from "react-router-dom";
 import { apiUrl } from "@/lib/api";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 
-interface TrendingAlbum {
+interface FeaturedAlbum {
   id: string;
   title: string;
   artist: string;
   year: number | null;
   coverUrl: string;
-  spotifyUrl: string | null;
+  spotifyUrl: string;
 }
 
-const TRENDING_ALBUM_PAGE_SIZE = 6;
+interface FeaturedAlbumSeed {
+  id: string;
+  title: string;
+  artist: string;
+  year: number | null;
+  query: string;
+}
+
+interface SpotifyAlbumSearchResult {
+  id: string;
+  title: string;
+  artist: string;
+  year: number | null;
+  coverUrl: string;
+  spotifyUrl?: string | null;
+}
+
+const FEATURED_ALBUM_SEEDS: FeaturedAlbumSeed[] = [
+  {
+    id: "debi-tirar-mas-fotos",
+    title: "DeBÍ TiRAR MáS FOToS",
+    artist: "Bad Bunny",
+    year: 2025,
+    query: "DeBÍ TiRAR MáS FOToS Bad Bunny",
+  },
+  {
+    id: "art-of-loving",
+    title: "The Art of Loving",
+    artist: "Olivia Dean",
+    year: 2025,
+    query: "The Art of Loving Olivia Dean",
+  },
+  {
+    id: "un-verano-sin-ti",
+    title: "Un Verano Sin Ti",
+    artist: "Bad Bunny",
+    year: 2022,
+    query: "Un Verano Sin Ti Bad Bunny",
+  },
+  {
+    id: "life-of-a-showgirl",
+    title: "The Life of a Showgirl",
+    artist: "Taylor Swift",
+    year: 2025,
+    query: "The Life of a Showgirl Taylor Swift",
+  },
+  {
+    id: "octane",
+    title: "Octane",
+    artist: "Don Toliver",
+    year: 2026,
+    query: "Octane Don Toliver",
+  },
+  {
+    id: "the-romantic",
+    title: "The Romantic",
+    artist: "Bruno Mars",
+    year: 2026,
+    query: "The Romantic Bruno Mars",
+  },
+];
 
 async function readJson(response: Response) {
   return response.json().catch(() => ({}));
 }
 
+function createFallbackFeaturedAlbum(seed: FeaturedAlbumSeed): FeaturedAlbum {
+  return {
+    id: seed.id,
+    title: seed.title,
+    artist: seed.artist,
+    year: seed.year,
+    coverUrl: "",
+    spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(seed.query)}`,
+  };
+}
+
 const Index = () => {
   const reviews = useReviewStore((s) => s.reviews);
-  const [trendingAlbums, setTrendingAlbums] = useState<TrendingAlbum[]>([]);
+  const [featuredAlbums, setFeaturedAlbums] = useState<FeaturedAlbum[]>(
+    FEATURED_ALBUM_SEEDS.map(createFallbackFeaturedAlbum)
+  );
   const [trendingSongs, setTrendingSongs] = useState<Song[]>([]);
-  const [isLoadingTrending, setIsLoadingTrending] = useState(true);
-  const [trendingError, setTrendingError] = useState<string | null>(null);
-  const [trendingAlbumPage, setTrendingAlbumPage] = useState(0);
+  const [isLoadingTrendingSongs, setIsLoadingTrendingSongs] = useState(true);
+  const [trendingSongsError, setTrendingSongsError] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
 
     void (async () => {
-      setIsLoadingTrending(true);
-      setTrendingError(null);
+      const nextFeaturedAlbums = await Promise.all(
+        FEATURED_ALBUM_SEEDS.map(async (seed) => {
+          try {
+            const response = await fetch(
+              apiUrl(`/api/search?q=${encodeURIComponent(seed.query)}&type=album&limit=1`),
+              { signal: controller.signal }
+            );
+            const data = await readJson(response);
+
+            if (!response.ok || !Array.isArray(data.albums) || data.albums.length === 0) {
+              return createFallbackFeaturedAlbum(seed);
+            }
+
+            const album = data.albums[0] as SpotifyAlbumSearchResult;
+
+            return {
+              id: album.id || seed.id,
+              title: album.title || seed.title,
+              artist: album.artist || seed.artist,
+              year: typeof album.year === "number" ? album.year : seed.year,
+              coverUrl: album.coverUrl || "",
+              spotifyUrl: album.spotifyUrl || `https://open.spotify.com/search/${encodeURIComponent(seed.query)}`,
+            };
+          } catch {
+            return createFallbackFeaturedAlbum(seed);
+          }
+        })
+      );
+
+      if (!controller.signal.aborted) {
+        setFeaturedAlbums(nextFeaturedAlbums);
+      }
+    })();
+
+    return () => {
+      controller.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    void (async () => {
+      setIsLoadingTrendingSongs(true);
+      setTrendingSongsError(null);
 
       try {
         const response = await fetch(apiUrl("/api/trending"), {
@@ -47,9 +162,22 @@ const Index = () => {
           throw new Error(typeof data?.error === "string" ? data.error : "Failed to load trending music.");
         }
 
-        setTrendingAlbums(Array.isArray(data.albums) ? data.albums : []);
-        setTrendingAlbumPage(0);
-        setTrendingSongs(Array.isArray(data.tracks) ? data.tracks : []);
+        let nextTracks = Array.isArray(data.tracks) ? data.tracks : [];
+
+        if (nextTracks.length === 0) {
+          const currentYear = new Date().getFullYear();
+          const trackResponse = await fetch(
+            apiUrl(`/api/search?q=${encodeURIComponent(`year:${currentYear}`)}&type=track&limit=8`),
+            { signal: controller.signal }
+          );
+          const trackData = await readJson(trackResponse);
+
+          if (trackResponse.ok) {
+            nextTracks = Array.isArray(trackData.tracks) ? trackData.tracks : [];
+          }
+        }
+
+        setTrendingSongs(nextTracks);
       } catch (error) {
         if (controller.signal.aborted) {
           return;
@@ -57,38 +185,28 @@ const Index = () => {
 
         try {
           const currentYear = new Date().getFullYear();
-          const [albumResponse, trackResponse] = await Promise.all([
-            fetch(apiUrl(`/api/search?q=${encodeURIComponent(`year:${currentYear}`)}&type=album&limit=12`), {
-              signal: controller.signal,
-            }),
-            fetch(apiUrl(`/api/search?q=${encodeURIComponent(`year:${currentYear}`)}&type=track&limit=8`), {
-              signal: controller.signal,
-            }),
-          ]);
-          const [albumData, trackData] = await Promise.all([
-            readJson(albumResponse),
-            readJson(trackResponse),
-          ]);
+          const trackResponse = await fetch(
+            apiUrl(`/api/search?q=${encodeURIComponent(`year:${currentYear}`)}&type=track&limit=8`),
+            { signal: controller.signal }
+          );
+          const trackData = await readJson(trackResponse);
 
-          if (!albumResponse.ok || !trackResponse.ok) {
-            throw new Error("Failed to load fallback Spotify results.");
+          if (!trackResponse.ok) {
+            throw new Error("Failed to load Spotify songs.");
           }
 
           if (controller.signal.aborted) {
             return;
           }
 
-          setTrendingAlbums(Array.isArray(albumData.albums) ? albumData.albums : []);
-          setTrendingAlbumPage(0);
           setTrendingSongs(Array.isArray(trackData.tracks) ? trackData.tracks : []);
         } catch (fallbackError) {
           if (controller.signal.aborted) {
             return;
           }
 
-          setTrendingAlbums([]);
           setTrendingSongs([]);
-          setTrendingError(
+          setTrendingSongsError(
             fallbackError instanceof Error
               ? fallbackError.message
               : (error instanceof Error ? error.message : "Failed to load trending music.")
@@ -96,7 +214,7 @@ const Index = () => {
         }
       } finally {
         if (!controller.signal.aborted) {
-          setIsLoadingTrending(false);
+          setIsLoadingTrendingSongs(false);
         }
       }
     })();
@@ -105,12 +223,6 @@ const Index = () => {
       controller.abort();
     };
   }, []);
-
-  const totalTrendingAlbumPages = Math.max(1, Math.ceil(trendingAlbums.length / TRENDING_ALBUM_PAGE_SIZE));
-  const visibleTrendingAlbums = trendingAlbums.slice(
-    trendingAlbumPage * TRENDING_ALBUM_PAGE_SIZE,
-    (trendingAlbumPage + 1) * TRENDING_ALBUM_PAGE_SIZE
-  );
 
   return (
     <div className="min-h-screen">
@@ -129,80 +241,58 @@ const Index = () => {
         </div>
       </section>
 
-      {/* Trending Albums */}
+      {/* Featured Albums */}
       <section className="container py-12">
         <div className="mb-6 flex items-end justify-between gap-4">
           <div>
-            <h2 className="font-display text-2xl font-bold">Trending Albums</h2>
+            <h2 className="font-display text-2xl font-bold">Featured Albums</h2>
+            <p className="mt-1 text-sm text-muted-foreground">A handpicked shelf hydrated with Spotify metadata.</p>
           </div>
-          {trendingAlbums.length > TRENDING_ALBUM_PAGE_SIZE && (
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setTrendingAlbumPage((currentPage) => (
-                  currentPage === 0 ? totalTrendingAlbumPages - 1 : currentPage - 1
-                ))}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card/95 text-foreground shadow-md transition-colors hover:bg-card"
-                aria-label="Previous trending albums"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setTrendingAlbumPage((currentPage) => (
-                  currentPage >= totalTrendingAlbumPages - 1 ? 0 : currentPage + 1
-                ))}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card/95 text-foreground shadow-md transition-colors hover:bg-card"
-                aria-label="Next trending albums"
-              >
-                <ChevronRight className="h-5 w-5" />
-              </button>
-            </div>
-          )}
         </div>
-        {isLoadingTrending ? (
-          <div className="rounded-xl border border-dashed border-border bg-card/40 p-6 text-sm text-muted-foreground">
-            Loading trending Spotify albums...
-          </div>
-        ) : trendingError ? (
-          <div className="rounded-xl border border-dashed border-border bg-card/40 p-6 text-sm text-muted-foreground">
-            {trendingError}
-          </div>
-        ) : trendingAlbums.length > 0 ? (
-          <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 xl:grid-cols-6">
-            {visibleTrendingAlbums.map((album, index) => (
-              <a
-                key={album.id}
-                href={album.spotifyUrl || undefined}
-                target="_blank"
-                rel="noreferrer"
-                className="group animate-fade-in"
-                style={{ animationDelay: `${index * 80}ms` }}
-              >
-                <div className="overflow-hidden rounded-lg border border-border bg-card/70">
+        <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 xl:grid-cols-6">
+          {featuredAlbums.map((album, index) => (
+            <a
+              key={album.id}
+              href={album.spotifyUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="group animate-fade-in"
+              style={{ animationDelay: `${index * 80}ms` }}
+            >
+              {album.coverUrl ? (
+                <div className="overflow-hidden rounded-lg border border-border bg-card/70 shadow-lg">
                   <img
                     src={album.coverUrl}
                     alt={album.title}
                     className="aspect-square w-full object-cover transition-transform duration-500 group-hover:scale-105"
                   />
                 </div>
-                <div className="mt-3 space-y-1">
-                  <h3 className="truncate text-sm font-semibold group-hover:text-primary transition-colors">
-                    {album.title}
-                  </h3>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {album.artist}
-                    {album.year ? ` · ${album.year}` : ""}
-                  </p>
+              ) : (
+                <div className="aspect-square overflow-hidden rounded-lg border border-border bg-card/70 p-4 text-foreground shadow-lg">
+                  <div className="flex h-full flex-col justify-between rounded-md border border-border/70 bg-background/80 p-3">
+                    <p className="line-clamp-3 text-lg font-black uppercase tracking-tight">{album.title}</p>
+                    <div>
+                      <p className="truncate text-xs font-semibold uppercase tracking-[0.18em]">{album.artist}</p>
+                      <p className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+                        Open in Spotify
+                        <ExternalLink className="h-3 w-3" />
+                      </p>
+                    </div>
+                  </div>
                 </div>
-              </a>
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-xl border border-dashed border-border bg-card/40 p-6 text-sm text-muted-foreground">
-            No trending albums are available right now.
-          </div>
-        )}
+              )}
+              <div className="mt-3 space-y-1">
+                <h3 className="truncate text-sm font-semibold group-hover:text-primary transition-colors">
+                  {album.title}
+                </h3>
+                <p className="truncate text-xs text-muted-foreground">
+                  {album.artist}
+                  {album.year ? ` · ${album.year}` : ""}
+                </p>
+              </div>
+            </a>
+          ))}
+        </div>
       </section>
 
       {/* Trending Songs */}
@@ -212,13 +302,13 @@ const Index = () => {
             <h2 className="font-display text-2xl font-bold">Trending Songs</h2>
           </div>
         </div>
-        {isLoadingTrending ? (
+        {isLoadingTrendingSongs ? (
           <div className="rounded-xl border border-dashed border-border bg-card/40 p-6 text-sm text-muted-foreground">
             Loading trending Spotify songs...
           </div>
-        ) : trendingError ? (
+        ) : trendingSongsError ? (
           <div className="rounded-xl border border-dashed border-border bg-card/40 p-6 text-sm text-muted-foreground">
-            {trendingError}
+            {trendingSongsError}
           </div>
         ) : trendingSongs.length > 0 ? (
           <div className="grid gap-3">
