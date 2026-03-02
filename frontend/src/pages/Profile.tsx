@@ -12,6 +12,7 @@ import { getProfileAreaTheme } from "@/lib/profileTheme";
 
 const MAX_AVATAR_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_DISPLAY_NAME_LENGTH = 40;
+const MAX_USERNAME_LENGTH = 30;
 const LIKED_SONG_PREVIEW_COUNT = 5;
 const MAX_FAVORITE_SONGS = 4;
 const AVATAR_EDITOR_SIZE = 280;
@@ -45,6 +46,9 @@ export default function Profile() {
   const [avatarOffsetX, setAvatarOffsetX] = useState(0);
   const [avatarOffsetY, setAvatarOffsetY] = useState(0);
   const [displayNameDraft, setDisplayNameDraft] = useState(user?.displayName || "");
+  const [isEditingUsername, setIsEditingUsername] = useState(false);
+  const [isUpdatingUsername, setIsUpdatingUsername] = useState(false);
+  const [usernameDraft, setUsernameDraft] = useState(user?.username || "");
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const joinedLabel = user?.joinedDate
     ? new Date(user.joinedDate).toLocaleDateString("en-US", { month: "long", year: "numeric" })
@@ -90,6 +94,10 @@ export default function Profile() {
   useEffect(() => {
     saveRecentProfileColors(recentProfileColors);
   }, [recentProfileColors]);
+
+  useEffect(() => {
+    setUsernameDraft(user?.username || "");
+  }, [user?.username]);
 
   async function handleProfileColorSelect(colorValue: string) {
     setProfileColor(colorValue);
@@ -290,6 +298,36 @@ export default function Profile() {
     await persistFavoriteSongs(nextFavoriteSongs, "Favorite song replaced.");
   }
 
+  async function handleUsernameSave() {
+    const nextUsername = usernameDraft.trim().toLowerCase();
+
+    if (!nextUsername) {
+      toast.error("Username cannot be empty.");
+      return;
+    }
+
+    if (/\s/.test(nextUsername)) {
+      toast.error("Username cannot contain spaces.");
+      return;
+    }
+
+    if (nextUsername === user.username) {
+      setIsEditingUsername(false);
+      return;
+    }
+
+    try {
+      setIsUpdatingUsername(true);
+      await updateProfile({ username: nextUsername });
+      setIsEditingUsername(false);
+      toast.success("Username updated.");
+    } catch (error) {
+      setUsernameDraft(user.username);
+      toast.error(error instanceof Error ? error.message : "Failed to update username.");
+    } finally {
+      setIsUpdatingUsername(false);
+    }
+  }
   if (isLoading) {
     return (
       <div className="container py-20 text-center">
@@ -493,10 +531,68 @@ export default function Profile() {
                 </>
               )}
             </div>
-            <p className="text-muted-foreground">@{user.username}</p>
+            {isEditingUsername ? (
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <span className="text-muted-foreground">@</span>
+                <input
+                  type="text"
+                  value={usernameDraft}
+                  onChange={(event) => setUsernameDraft(event.target.value)}
+                  maxLength={MAX_USERNAME_LENGTH}
+                  disabled={isUpdatingUsername}
+                  className="min-w-[200px] max-w-full rounded-lg border border-border bg-background/80 px-3 py-2 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleUsernameSave();
+                  }}
+                  disabled={isUpdatingUsername}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-background/80 text-foreground transition-colors hover:bg-background disabled:cursor-not-allowed disabled:opacity-60"
+                  style={profileTheme.subtlePanel}
+                  aria-label="Save username"
+                >
+                  <Save className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUsernameDraft(user.username);
+                    setIsEditingUsername(false);
+                  }}
+                  disabled={isUpdatingUsername}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-background/80 text-foreground transition-colors hover:bg-background disabled:cursor-not-allowed disabled:opacity-60"
+                  style={profileTheme.subtlePanel}
+                  aria-label="Cancel username edit"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <p className="text-muted-foreground">@{user.username}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUsernameDraft(user.username);
+                    setIsEditingUsername(true);
+                  }}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background/80 text-foreground transition-colors hover:bg-background"
+                  style={profileTheme.subtlePanel}
+                  aria-label="Edit username"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
             {isEditingDisplayName && (
               <p className="mt-1 text-xs text-muted-foreground">
                 {displayNameDraft.trim().length}/{MAX_DISPLAY_NAME_LENGTH}
+              </p>
+            )}
+            {isEditingUsername && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Username is used for your @handle and sign in. {usernameDraft.trim().length}/{MAX_USERNAME_LENGTH}
               </p>
             )}
             <div className="mt-2 flex items-center gap-4 text-sm text-muted-foreground">

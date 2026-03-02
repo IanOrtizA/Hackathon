@@ -19,6 +19,11 @@ interface CreateReviewInput {
   text: string;
 }
 
+interface UpdateReviewInput {
+  rating: number;
+  text: string;
+}
+
 type ReviewReaction = "like" | "dislike" | null;
 
 interface ReviewStore {
@@ -27,9 +32,11 @@ interface ReviewStore {
   error: string | null;
   loadReviews: (filters?: ReviewFilters, authToken?: string | null) => Promise<Review[]>;
   addReview: (review: CreateReviewInput, authToken: string) => Promise<Review>;
+  updateReview: (reviewId: string, updates: UpdateReviewInput, authToken: string) => Promise<Review>;
   deleteReview: (reviewId: string, authToken: string) => Promise<void>;
   reactToReview: (reviewId: string, reaction: ReviewReaction, authToken: string) => Promise<Review>;
   addComment: (reviewId: string, text: string, authToken: string) => Promise<Review>;
+  updateComment: (reviewId: string, commentId: string, text: string, authToken: string) => Promise<Review>;
   deleteComment: (reviewId: string, commentId: string, authToken: string) => Promise<Review>;
   toggleCommentLike: (reviewId: string, commentId: string, authToken: string) => Promise<Review>;
 }
@@ -158,6 +165,32 @@ export const useReviewStore = create<ReviewStore>((set) => ({
 
     return createdReview;
   },
+  updateReview: async (reviewId, updates, authToken) => {
+    const response = await fetch(apiUrl(`/api/reviews/${encodeURIComponent(reviewId)}`), {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(updates),
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(typeof data?.error === "string" ? data.error : "Failed to update review.");
+    }
+
+    const updatedReview = normalizeReview(data.review as Review);
+
+    set((state) => ({
+      reviews: state.reviews.map((review) => (
+        review.id === updatedReview.id ? updatedReview : review
+      )),
+      error: null,
+    }));
+
+    return updatedReview;
+  },
   deleteReview: async (reviewId, authToken) => {
     const response = await fetch(apiUrl(`/api/reviews/${encodeURIComponent(reviewId)}`), {
       method: "DELETE",
@@ -215,6 +248,35 @@ export const useReviewStore = create<ReviewStore>((set) => ({
 
     if (!response.ok) {
       throw new Error(typeof data?.error === "string" ? data.error : "Failed to add comment.");
+    }
+
+    const updatedReview = normalizeReview(data.review as Review);
+
+    set((state) => ({
+      reviews: state.reviews.map((review) => (
+        review.id === updatedReview.id ? updatedReview : review
+      )),
+      error: null,
+    }));
+
+    return updatedReview;
+  },
+  updateComment: async (reviewId, commentId, text, authToken) => {
+    const response = await fetch(
+      apiUrl(`/api/reviews/${encodeURIComponent(reviewId)}/comments/${encodeURIComponent(commentId)}`),
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ text }),
+      }
+    );
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(typeof data?.error === "string" ? data.error : "Failed to update comment.");
     }
 
     const updatedReview = normalizeReview(data.review as Review);

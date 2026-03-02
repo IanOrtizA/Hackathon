@@ -30,6 +30,7 @@ interface LoginInput {
 }
 
 interface ProfileUpdateInput {
+  username?: string;
   displayName?: string;
   avatarUrl?: string;
   profileColor?: string | null;

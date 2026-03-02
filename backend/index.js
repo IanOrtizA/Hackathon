@@ -217,14 +217,51 @@ function getOptionalAuthUserId(req) {
   return payload?.userId ? String(payload.userId) : null;
 }
 
-function sanitizeReviewComment(comment, viewerUserId = null) {
+async function buildReviewAuthorProfileMap(reviews) {
+  const userIds = new Set();
+
+  for (const review of reviews) {
+    if (review?.userId) {
+      userIds.add(String(review.userId));
+    }
+
+    const comments = Array.isArray(review?.comments) ? review.comments : [];
+
+    for (const comment of comments) {
+      if (comment?.userId) {
+        userIds.add(String(comment.userId));
+      }
+    }
+  }
+
+  if (userIds.size === 0) {
+    return new Map();
+  }
+
+  const users = await User.find({
+    _id: { $in: [...userIds] },
+  }).select('_id username avatarUrl');
+
+  return new Map(
+    users.map((user) => [
+      user._id.toString(),
+      {
+        username: user.username,
+        avatarUrl: user.avatarUrl,
+      },
+    ])
+  );
+}
+
+function sanitizeReviewComment(comment, viewerUserId = null, authorProfileMap = null) {
   const likedBy = Array.isArray(comment.likedBy) ? comment.likedBy : [];
+  const authorProfile = authorProfileMap?.get(String(comment.userId));
 
   return {
     id: comment._id.toString(),
     userId: comment.userId,
-    username: comment.username,
-    avatarUrl: comment.avatarUrl,
+    username: authorProfile?.username || comment.username,
+    avatarUrl: authorProfile?.avatarUrl || comment.avatarUrl,
     text: comment.text,
     likesCount: likedBy.length,
     popularityScore: likedBy.length,
@@ -233,10 +270,11 @@ function sanitizeReviewComment(comment, viewerUserId = null) {
   };
 }
 
-function sanitizeReview(review, viewerUserId = null) {
+function sanitizeReview(review, viewerUserId = null, authorProfileMap = null) {
   const likedBy = Array.isArray(review.likedBy) ? review.likedBy : [];
   const dislikedBy = Array.isArray(review.dislikedBy) ? review.dislikedBy : [];
   const comments = Array.isArray(review.comments) ? review.comments.slice(0, MAX_REVIEW_COMMENTS) : [];
+  const authorProfile = authorProfileMap?.get(String(review.userId));
   let currentUserReaction = null;
 
   if (viewerUserId) {
@@ -250,8 +288,8 @@ function sanitizeReview(review, viewerUserId = null) {
   return {
     id: review._id.toString(),
     userId: review.userId,
-    username: review.username,
-    avatarUrl: review.avatarUrl,
+    username: authorProfile?.username || review.username,
+    avatarUrl: authorProfile?.avatarUrl || review.avatarUrl,
     albumId: review.albumId,
     songId: review.songId || null,
     albumTitle: review.albumTitle,
@@ -262,7 +300,7 @@ function sanitizeReview(review, viewerUserId = null) {
     likesCount: likedBy.length,
     dislikesCount: dislikedBy.length,
     currentUserReaction,
-    comments: comments.map((comment) => sanitizeReviewComment(comment, viewerUserId)),
+    comments: comments.map((comment) => sanitizeReviewComment(comment, viewerUserId, authorProfileMap)),
     date: review.date ? review.date.toISOString().split('T')[0] : null,
   };
 }
@@ -879,7 +917,33 @@ app.post('/api/users/:id/friend-accept', requireAuth, async (req, res) => {
 app.patch('/api/auth/profile', requireAuth, async (req, res) => {
   const updates = {};
   const MAX_FAVORITE_SONGS = 4;
-  const { displayName, avatarUrl, profileColor, favoriteArtists, favoriteSongs, likedSongs, likedArtists, topFive } = req.body;
+  const {
+    username,
+    displayName,
+    avatarUrl,
+    profileColor,
+    favoriteArtists,
+    favoriteSongs,
+    likedSongs,
+    likedArtists,
+    topFive,
+  } = req.body;
+
+  if (typeof username === 'string') {
+    const normalizedUsername = username.trim().toLowerCase();
+
+    if (!normalizedUsername) {
+      return res.status(400).json({ error: 'Username cannot be empty.' });
+    }
+
+    if (/\s/.test(normalizedUsername)) {
+      return res.status(400).json({ error: 'Username cannot contain spaces.' });
+    }
+
+    if (normalizedUsername !== req.authUser.username) {
+      updates.username = normalizedUsername;
+    }
+  }
 
   if (typeof displayName === 'string' && displayName.trim()) {
     updates.displayName = displayName.trim();
@@ -941,8 +1005,47 @@ app.patch('/api/auth/profile', requireAuth, async (req, res) => {
   }
 
   try {
+    if (typeof updates.username === 'string') {
+      const existingUser = await User.findOne({
+        username: updates.username,
+        _id: { $ne: req.authUser._id },
+      });
+
+      if (existingUser) {
+        return res.status(409).json({ error: 'That username is already taken.' });
+      }
+    }
+
     Object.assign(req.authUser, updates);
     await req.authUser.save();
+
+    if (typeof updates.username === 'string' || typeof updates.avatarUrl === 'string') {
+      const authUserId = req.authUser._id.toString();
+      const reviewFieldUpdates = {};
+      const commentFieldUpdates = {};
+
+      if (typeof updates.username === 'string') {
+        reviewFieldUpdates.username = updates.username;
+        commentFieldUpdates['comments.$[comment].username'] = updates.username;
+      }
+
+      if (typeof updates.avatarUrl === 'string') {
+        reviewFieldUpdates.avatarUrl = updates.avatarUrl;
+        commentFieldUpdates['comments.$[comment].avatarUrl'] = updates.avatarUrl;
+      }
+
+      await Promise.all([
+        Review.updateMany(
+          { userId: authUserId },
+          { $set: reviewFieldUpdates }
+        ),
+        Review.updateMany(
+          { 'comments.userId': authUserId },
+          { $set: commentFieldUpdates },
+          { arrayFilters: [{ 'comment.userId': authUserId }] }
+        ),
+      ]);
+    }
 
     return res.json({
       user: sanitizeUser(req.authUser),
@@ -1153,9 +1256,10 @@ app.get('/api/reviews', async (req, res) => {
     const reviews = await Review.find(filters)
       .sort({ date: -1 })
       .limit(limit);
+    const authorProfileMap = await buildReviewAuthorProfileMap(reviews);
 
     return res.json({
-      reviews: reviews.map((review) => sanitizeReview(review, viewerUserId)),
+      reviews: reviews.map((review) => sanitizeReview(review, viewerUserId, authorProfileMap)),
     });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to fetch reviews' });
@@ -1175,6 +1279,14 @@ app.post('/api/reviews', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Album, artist, rating, and review text are required.' });
   }
 
+  if (rating < 1 || rating > 5) {
+    return res.status(400).json({ error: 'Ratings must be between 1 and 5.' });
+  }
+
+  if (text.length > 500) {
+    return res.status(400).json({ error: 'Reviews must be 500 characters or fewer.' });
+  }
+
   try {
     const newReview = await Review.create({
       albumId,
@@ -1188,15 +1300,62 @@ app.post('/api/reviews', requireAuth, async (req, res) => {
       rating,
       text,
     });
+    const authorProfileMap = await buildReviewAuthorProfileMap([newReview]);
 
     return res.status(201).json({
-      review: sanitizeReview(newReview, req.authUser._id.toString()),
+      review: sanitizeReview(newReview, req.authUser._id.toString(), authorProfileMap),
     });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to save review' });
   }
 });
 
+app.patch('/api/reviews/:id', requireAuth, async (req, res) => {
+  const reviewId = String(req.params.id || '').trim();
+  const text = String(req.body.text || '').trim();
+  const rating = Number(req.body.rating);
+
+  if (!reviewId) {
+    return res.status(400).json({ error: 'Review id is required.' });
+  }
+
+  if (!text || !Number.isFinite(rating)) {
+    return res.status(400).json({ error: 'Rating and review text are required.' });
+  }
+
+  if (rating < 1 || rating > 5) {
+    return res.status(400).json({ error: 'Ratings must be between 1 and 5.' });
+  }
+
+  if (text.length > 500) {
+    return res.status(400).json({ error: 'Reviews must be 500 characters or fewer.' });
+  }
+
+  try {
+    const review = await Review.findById(reviewId);
+
+    if (!review) {
+      return res.status(404).json({ error: 'Review not found.' });
+    }
+
+    const authUserId = req.authUser._id.toString();
+
+    if (review.userId !== authUserId) {
+      return res.status(403).json({ error: 'You can only edit your own reviews.' });
+    }
+
+    review.rating = rating;
+    review.text = text;
+    await review.save();
+    const authorProfileMap = await buildReviewAuthorProfileMap([review]);
+
+    return res.json({
+      review: sanitizeReview(review, authUserId, authorProfileMap),
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to update review.' });
+  }
+});
 app.delete('/api/reviews/:id', requireAuth, async (req, res) => {
   const reviewId = String(req.params.id || '').trim();
 
@@ -1211,7 +1370,9 @@ app.delete('/api/reviews/:id', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Review not found.' });
     }
 
-    if (review.userId !== req.authUser._id.toString()) {
+    const authUserId = req.authUser._id.toString();
+
+    if (review.userId !== authUserId) {
       return res.status(403).json({ error: 'You can only delete your own reviews.' });
     }
 
@@ -1257,9 +1418,10 @@ app.patch('/api/reviews/:id/reaction', requireAuth, async (req, res) => {
     review.likedBy = likedBy;
     review.dislikedBy = dislikedBy;
     await review.save();
+    const authorProfileMap = await buildReviewAuthorProfileMap([review]);
 
     return res.json({
-      review: sanitizeReview(review, authUserId),
+      review: sanitizeReview(review, authUserId, authorProfileMap),
     });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to update review reaction.' });
@@ -1300,15 +1462,63 @@ app.post('/api/reviews/:id/comments', requireAuth, async (req, res) => {
       text,
     });
     await review.save();
+    const authorProfileMap = await buildReviewAuthorProfileMap([review]);
 
     return res.status(201).json({
-      review: sanitizeReview(review, req.authUser._id.toString()),
+      review: sanitizeReview(review, req.authUser._id.toString(), authorProfileMap),
     });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to add comment.' });
   }
 });
 
+app.patch('/api/reviews/:reviewId/comments/:commentId', requireAuth, async (req, res) => {
+  const reviewId = String(req.params.reviewId || '').trim();
+  const commentId = String(req.params.commentId || '').trim();
+  const text = String(req.body.text || '').trim();
+
+  if (!reviewId || !commentId) {
+    return res.status(400).json({ error: 'Review id and comment id are required.' });
+  }
+
+  if (!text) {
+    return res.status(400).json({ error: 'Comment text is required.' });
+  }
+
+  if (text.length > 300) {
+    return res.status(400).json({ error: 'Comments must be 300 characters or fewer.' });
+  }
+
+  try {
+    const review = await Review.findById(reviewId);
+
+    if (!review) {
+      return res.status(404).json({ error: 'Review not found.' });
+    }
+
+    const comment = review.comments.id(commentId);
+
+    if (!comment) {
+      return res.status(404).json({ error: 'Comment not found.' });
+    }
+
+    const authUserId = req.authUser._id.toString();
+
+    if (comment.userId !== authUserId) {
+      return res.status(403).json({ error: 'You can only edit your own comments.' });
+    }
+
+    comment.text = text;
+    await review.save();
+    const authorProfileMap = await buildReviewAuthorProfileMap([review]);
+
+    return res.json({
+      review: sanitizeReview(review, authUserId, authorProfileMap),
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to update comment.' });
+  }
+});
 app.delete('/api/reviews/:reviewId/comments/:commentId', requireAuth, async (req, res) => {
   const reviewId = String(req.params.reviewId || '').trim();
   const commentId = String(req.params.commentId || '').trim();
@@ -1330,15 +1540,18 @@ app.delete('/api/reviews/:reviewId/comments/:commentId', requireAuth, async (req
       return res.status(404).json({ error: 'Comment not found.' });
     }
 
-    if (comment.userId !== req.authUser._id.toString()) {
+    const authUserId = req.authUser._id.toString();
+
+    if (comment.userId !== authUserId) {
       return res.status(403).json({ error: 'You can only delete your own comments.' });
     }
 
-    review.comments.pull(commentId);
+    comment.deleteOne();
     await review.save();
+    const authorProfileMap = await buildReviewAuthorProfileMap([review]);
 
     return res.json({
-      review: sanitizeReview(review, req.authUser._id.toString()),
+      review: sanitizeReview(review, authUserId, authorProfileMap),
     });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to delete comment.' });
@@ -1375,9 +1588,10 @@ app.patch('/api/reviews/:reviewId/comments/:commentId/like', requireAuth, async 
       : [...likedBy, authUserId];
 
     await review.save();
+    const authorProfileMap = await buildReviewAuthorProfileMap([review]);
 
     return res.json({
-      review: sanitizeReview(review, authUserId),
+      review: sanitizeReview(review, authUserId, authorProfileMap),
     });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to update comment like.' });

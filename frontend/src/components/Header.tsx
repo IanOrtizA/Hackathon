@@ -15,8 +15,8 @@ export function Header() {
 
   return (
     <header className="sticky top-0 z-50 border-b border-border/80 bg-background/95">
-      <div className="container flex h-16 items-center justify-between gap-4">
-        <Link to="/" className="flex items-center gap-3">
+      <div className="container grid h-16 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4">
+        <Link to="/" className="flex min-w-0 items-center gap-3 justify-self-start">
           <div className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-card/70">
             <div className="flex items-end gap-0.5">
               <span className="block h-2 w-0.5 rounded-full bg-foreground/70" />
@@ -27,7 +27,7 @@ export function Header() {
           <span className="text-base font-semibold tracking-[0.18em] uppercase text-foreground">MusicBox</span>
         </Link>
 
-        <nav className="flex items-center gap-5">
+        <nav className="flex items-center justify-center gap-4 justify-self-center sm:gap-5">
           {navItems.map(({ to, label, icon: Icon }) => (
             <Link
               key={to}
@@ -45,7 +45,7 @@ export function Header() {
           ))}
         </nav>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 justify-self-end">
           {isAuthenticated && user ? (
             <>
               <Link
