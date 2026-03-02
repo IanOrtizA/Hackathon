@@ -38,7 +38,7 @@ export default function Discover() {
   const [acceptingRequestUserId, setAcceptingRequestUserId] = useState<string | null>(null);
   const [showAllFriends, setShowAllFriends] = useState(false);
   const [showAllRequests, setShowAllRequests] = useState(false);
-  const [isNetworkOpen, setIsNetworkOpen] = useState(true);
+  const [isNetworkOpen, setIsNetworkOpen] = useState(false);
 
   const matches = getTasteMatches(matchMode);
   const searchQuery = search.trim();
@@ -244,11 +244,7 @@ export default function Discover() {
             {isNetworkOpen ? "Hide" : "Show"}
           </button>
         </div>
-        {!isNetworkOpen ? (
-          <div className="rounded-xl border border-dashed border-border bg-card/40 p-5 text-sm text-muted-foreground">
-            Friend activity is hidden.
-          </div>
-        ) : !isAuthenticated ? (
+        {isNetworkOpen && (!isAuthenticated ? (
           <div className="rounded-xl border border-dashed border-border bg-card/40 p-5 text-sm text-muted-foreground">
             Sign in to manage your friends and accept requests.
           </div>
@@ -347,7 +343,7 @@ export default function Discover() {
               )}
             </div>
           </div>
-        )}
+        ))}
       </section>
 
       {/* Search results */}

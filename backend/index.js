@@ -596,7 +596,7 @@ async function findStrictUsTrendingFeed(accessToken) {
 
       return 0;
     })
-    .slice(0, 6)
+    .slice(0, 12)
     .map((entry) => mapSpotifyAlbum(entry.album));
 
   return {
@@ -612,7 +612,7 @@ async function findTrendingAlbums(accessToken) {
   try {
     const newReleasesData = await getSpotifyNewReleases(accessToken, {
       country: 'US',
-      limit: 6,
+      limit: 12,
     });
 
     return Array.isArray(newReleasesData.albums?.items)
@@ -624,7 +624,7 @@ async function findTrendingAlbums(accessToken) {
     const fallbackAlbumSearchData = await searchSpotifyCatalog(accessToken, {
       query: `year:${currentYear}`,
       types: ['album'],
-      limit: 6,
+      limit: 12,
       market: 'US',
     });
 

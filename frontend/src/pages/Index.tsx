@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Song } from "@/types/music";
 import { Link } from "react-router-dom";
 import { apiUrl } from "@/lib/api";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 interface TrendingAlbum {
   id: string;
@@ -14,6 +15,8 @@ interface TrendingAlbum {
   coverUrl: string;
   spotifyUrl: string | null;
 }
+
+const TRENDING_ALBUM_PAGE_SIZE = 6;
 
 async function readJson(response: Response) {
   return response.json().catch(() => ({}));
@@ -25,6 +28,7 @@ const Index = () => {
   const [trendingSongs, setTrendingSongs] = useState<Song[]>([]);
   const [isLoadingTrending, setIsLoadingTrending] = useState(true);
   const [trendingError, setTrendingError] = useState<string | null>(null);
+  const [trendingAlbumPage, setTrendingAlbumPage] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -44,6 +48,7 @@ const Index = () => {
         }
 
         setTrendingAlbums(Array.isArray(data.albums) ? data.albums : []);
+        setTrendingAlbumPage(0);
         setTrendingSongs(Array.isArray(data.tracks) ? data.tracks : []);
       } catch (error) {
         if (controller.signal.aborted) {
@@ -53,7 +58,7 @@ const Index = () => {
         try {
           const currentYear = new Date().getFullYear();
           const [albumResponse, trackResponse] = await Promise.all([
-            fetch(apiUrl(`/api/search?q=${encodeURIComponent(`year:${currentYear}`)}&type=album&limit=6`), {
+            fetch(apiUrl(`/api/search?q=${encodeURIComponent(`year:${currentYear}`)}&type=album&limit=12`), {
               signal: controller.signal,
             }),
             fetch(apiUrl(`/api/search?q=${encodeURIComponent(`year:${currentYear}`)}&type=track&limit=8`), {
@@ -74,6 +79,7 @@ const Index = () => {
           }
 
           setTrendingAlbums(Array.isArray(albumData.albums) ? albumData.albums : []);
+          setTrendingAlbumPage(0);
           setTrendingSongs(Array.isArray(trackData.tracks) ? trackData.tracks : []);
         } catch (fallbackError) {
           if (controller.signal.aborted) {
@@ -100,6 +106,12 @@ const Index = () => {
     };
   }, []);
 
+  const totalTrendingAlbumPages = Math.max(1, Math.ceil(trendingAlbums.length / TRENDING_ALBUM_PAGE_SIZE));
+  const visibleTrendingAlbums = trendingAlbums.slice(
+    trendingAlbumPage * TRENDING_ALBUM_PAGE_SIZE,
+    (trendingAlbumPage + 1) * TRENDING_ALBUM_PAGE_SIZE
+  );
+
   return (
     <div className="min-h-screen">
       {/* Hero */}
@@ -112,7 +124,7 @@ const Index = () => {
             <span className="text-gradient">your story.</span>
           </h1>
           <p className="mt-4 max-w-md text-secondary-foreground text-lg">
-            Rate albums, curate your Top 5, and find listeners who hear the world like you do.
+            Rate albums, curate your favorites, and find listeners who hear the world like you do.
           </p>
         </div>
       </section>
@@ -123,6 +135,30 @@ const Index = () => {
           <div>
             <h2 className="font-display text-2xl font-bold">Trending Albums</h2>
           </div>
+          {trendingAlbums.length > TRENDING_ALBUM_PAGE_SIZE && (
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setTrendingAlbumPage((currentPage) => (
+                  currentPage === 0 ? totalTrendingAlbumPages - 1 : currentPage - 1
+                ))}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card/95 text-foreground shadow-md transition-colors hover:bg-card"
+                aria-label="Previous trending albums"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setTrendingAlbumPage((currentPage) => (
+                  currentPage >= totalTrendingAlbumPages - 1 ? 0 : currentPage + 1
+                ))}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card/95 text-foreground shadow-md transition-colors hover:bg-card"
+                aria-label="Next trending albums"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+            </div>
+          )}
         </div>
         {isLoadingTrending ? (
           <div className="rounded-xl border border-dashed border-border bg-card/40 p-6 text-sm text-muted-foreground">
@@ -133,8 +169,8 @@ const Index = () => {
             {trendingError}
           </div>
         ) : trendingAlbums.length > 0 ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-5">
-            {trendingAlbums.map((album, index) => (
+          <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 xl:grid-cols-6">
+            {visibleTrendingAlbums.map((album, index) => (
               <a
                 key={album.id}
                 href={album.spotifyUrl || undefined}
