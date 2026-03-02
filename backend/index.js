@@ -7,6 +7,7 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const MAX_REVIEW_COMMENTS = 5;
 
 // Middleware (Lets frontend talk to backend, and allows us to read JSON data)
 app.use(cors());
@@ -235,7 +236,7 @@ function sanitizeReviewComment(comment, viewerUserId = null) {
 function sanitizeReview(review, viewerUserId = null) {
   const likedBy = Array.isArray(review.likedBy) ? review.likedBy : [];
   const dislikedBy = Array.isArray(review.dislikedBy) ? review.dislikedBy : [];
-  const comments = Array.isArray(review.comments) ? review.comments : [];
+  const comments = Array.isArray(review.comments) ? review.comments.slice(0, MAX_REVIEW_COMMENTS) : [];
   let currentUserReaction = null;
 
   if (viewerUserId) {
@@ -1196,6 +1197,32 @@ app.post('/api/reviews', requireAuth, async (req, res) => {
   }
 });
 
+app.delete('/api/reviews/:id', requireAuth, async (req, res) => {
+  const reviewId = String(req.params.id || '').trim();
+
+  if (!reviewId) {
+    return res.status(400).json({ error: 'Review id is required.' });
+  }
+
+  try {
+    const review = await Review.findById(reviewId);
+
+    if (!review) {
+      return res.status(404).json({ error: 'Review not found.' });
+    }
+
+    if (review.userId !== req.authUser._id.toString()) {
+      return res.status(403).json({ error: 'You can only delete your own reviews.' });
+    }
+
+    await review.deleteOne();
+
+    return res.status(204).send();
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to delete review.' });
+  }
+});
+
 app.patch('/api/reviews/:id/reaction', requireAuth, async (req, res) => {
   const reviewId = String(req.params.id || '').trim();
   const reaction = typeof req.body.reaction === 'string'
@@ -1262,6 +1289,10 @@ app.post('/api/reviews/:id/comments', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Review not found.' });
     }
 
+    if (Array.isArray(review.comments) && review.comments.length >= MAX_REVIEW_COMMENTS) {
+      return res.status(400).json({ error: `Reviews can only have up to ${MAX_REVIEW_COMMENTS} comments.` });
+    }
+
     review.comments.push({
       userId: req.authUser._id.toString(),
       username: req.authUser.username,
@@ -1275,6 +1306,42 @@ app.post('/api/reviews/:id/comments', requireAuth, async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to add comment.' });
+  }
+});
+
+app.delete('/api/reviews/:reviewId/comments/:commentId', requireAuth, async (req, res) => {
+  const reviewId = String(req.params.reviewId || '').trim();
+  const commentId = String(req.params.commentId || '').trim();
+
+  if (!reviewId || !commentId) {
+    return res.status(400).json({ error: 'Review id and comment id are required.' });
+  }
+
+  try {
+    const review = await Review.findById(reviewId);
+
+    if (!review) {
+      return res.status(404).json({ error: 'Review not found.' });
+    }
+
+    const comment = review.comments.id(commentId);
+
+    if (!comment) {
+      return res.status(404).json({ error: 'Comment not found.' });
+    }
+
+    if (comment.userId !== req.authUser._id.toString()) {
+      return res.status(403).json({ error: 'You can only delete your own comments.' });
+    }
+
+    review.comments.pull(commentId);
+    await review.save();
+
+    return res.json({
+      review: sanitizeReview(review, req.authUser._id.toString()),
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to delete comment.' });
   }
 });
 

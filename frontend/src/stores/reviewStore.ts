@@ -27,8 +27,10 @@ interface ReviewStore {
   error: string | null;
   loadReviews: (filters?: ReviewFilters, authToken?: string | null) => Promise<Review[]>;
   addReview: (review: CreateReviewInput, authToken: string) => Promise<Review>;
+  deleteReview: (reviewId: string, authToken: string) => Promise<void>;
   reactToReview: (reviewId: string, reaction: ReviewReaction, authToken: string) => Promise<Review>;
   addComment: (reviewId: string, text: string, authToken: string) => Promise<Review>;
+  deleteComment: (reviewId: string, commentId: string, authToken: string) => Promise<Review>;
   toggleCommentLike: (reviewId: string, commentId: string, authToken: string) => Promise<Review>;
 }
 
@@ -156,6 +158,24 @@ export const useReviewStore = create<ReviewStore>((set) => ({
 
     return createdReview;
   },
+  deleteReview: async (reviewId, authToken) => {
+    const response = await fetch(apiUrl(`/api/reviews/${encodeURIComponent(reviewId)}`), {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(typeof data?.error === "string" ? data.error : "Failed to delete review.");
+    }
+
+    set((state) => ({
+      reviews: state.reviews.filter((review) => review.id !== reviewId),
+      error: null,
+    }));
+  },
   reactToReview: async (reviewId, reaction, authToken) => {
     const response = await fetch(apiUrl(`/api/reviews/${encodeURIComponent(reviewId)}/reaction`), {
       method: "PATCH",
@@ -195,6 +215,33 @@ export const useReviewStore = create<ReviewStore>((set) => ({
 
     if (!response.ok) {
       throw new Error(typeof data?.error === "string" ? data.error : "Failed to add comment.");
+    }
+
+    const updatedReview = normalizeReview(data.review as Review);
+
+    set((state) => ({
+      reviews: state.reviews.map((review) => (
+        review.id === updatedReview.id ? updatedReview : review
+      )),
+      error: null,
+    }));
+
+    return updatedReview;
+  },
+  deleteComment: async (reviewId, commentId, authToken) => {
+    const response = await fetch(
+      apiUrl(`/api/reviews/${encodeURIComponent(reviewId)}/comments/${encodeURIComponent(commentId)}`),
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      }
+    );
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(typeof data?.error === "string" ? data.error : "Failed to delete comment.");
     }
 
     const updatedReview = normalizeReview(data.review as Review);

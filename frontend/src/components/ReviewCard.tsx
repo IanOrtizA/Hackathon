@@ -1,20 +1,23 @@
 import { Review } from "@/types/music";
 import { RatingStars } from "./RatingStars";
 import { Link } from "react-router-dom";
-import { Heart, MessageSquare, Send, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Heart, MessageSquare, Send, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useReviewStore } from "@/stores/reviewStore";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
 const MAX_COMMENT_LENGTH = 300;
+const MAX_REVIEW_COMMENTS = 5;
 
 export function ReviewCard({ review }: { review: Review }) {
   const detailLink = review.songId ? `/song/${review.songId}` : `/album/${review.albumId}`;
+  const deleteReview = useReviewStore((state) => state.deleteReview);
   const reactToReview = useReviewStore((state) => state.reactToReview);
   const addComment = useReviewStore((state) => state.addComment);
+  const deleteComment = useReviewStore((state) => state.deleteComment);
   const toggleCommentLike = useReviewStore((state) => state.toggleCommentLike);
-  const { isAuthenticated, token } = useAuth();
+  const { isAuthenticated, token, user } = useAuth();
   const comments = Array.isArray(review.comments) ? review.comments : [];
   const likesCount = typeof review.likesCount === "number" ? review.likesCount : 0;
   const dislikesCount = typeof review.dislikesCount === "number" ? review.dislikesCount : 0;
@@ -22,14 +25,18 @@ export function ReviewCard({ review }: { review: Review }) {
     review.currentUserReaction === "like" || review.currentUserReaction === "dislike"
       ? review.currentUserReaction
       : null;
+  const isOwnReview = user?.id === review.userId;
   const [isSubmittingReaction, setIsSubmittingReaction] = useState(false);
+  const [isDeletingReview, setIsDeletingReview] = useState(false);
   const [commentLikeTargetId, setCommentLikeTargetId] = useState<string | null>(null);
-  const [isCommentsOpen, setIsCommentsOpen] = useState(comments.length > 0);
+  const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
+  const [isCommentsOpen, setIsCommentsOpen] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const trimmedComment = commentText.trim();
   const canSubmitComment =
     isAuthenticated &&
+    comments.length < MAX_REVIEW_COMMENTS &&
     trimmedComment.length > 0 &&
     trimmedComment.length <= MAX_COMMENT_LENGTH;
 
@@ -50,6 +57,26 @@ export function ReviewCard({ review }: { review: Review }) {
       toast.error(error instanceof Error ? error.message : "Failed to update review reaction.");
     } finally {
       setIsSubmittingReaction(false);
+    }
+  }
+
+  async function handleReviewDelete() {
+    if (!isAuthenticated || !token || !isOwnReview) {
+      return;
+    }
+
+    if (!window.confirm("Delete this review?")) {
+      return;
+    }
+
+    try {
+      setIsDeletingReview(true);
+      await deleteReview(review.id, token);
+      toast.success("Review deleted.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete review.");
+    } finally {
+      setIsDeletingReview(false);
     }
   }
 
@@ -86,6 +113,26 @@ export function ReviewCard({ review }: { review: Review }) {
     }
   }
 
+  async function handleCommentDelete(commentId: string) {
+    if (!isAuthenticated || !token) {
+      return;
+    }
+
+    if (!window.confirm("Delete this comment?")) {
+      return;
+    }
+
+    try {
+      setDeletingCommentId(commentId);
+      await deleteComment(review.id, commentId, token);
+      toast.success("Comment deleted.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete comment.");
+    } finally {
+      setDeletingCommentId(null);
+    }
+  }
+
   return (
     <div className="flex gap-4 rounded-xl bg-card p-4 border border-border card-hover">
       <Link to={detailLink} className="shrink-0">
@@ -111,6 +158,22 @@ export function ReviewCard({ review }: { review: Review }) {
           <Link to={`/user/${review.userId}`} className="text-xs text-muted-foreground hover:text-primary transition-colors">{review.username}</Link>
           <span className="text-xs text-muted-foreground">·</span>
           <span className="text-xs text-muted-foreground">{review.date}</span>
+          {isOwnReview && (
+            <>
+              <span className="text-xs text-muted-foreground">·</span>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleReviewDelete();
+                }}
+                disabled={isDeletingReview}
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-destructive disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {isDeletingReview ? "Deleting..." : "Delete"}
+              </button>
+            </>
+          )}
         </div>
         <div className="mt-3 flex items-center gap-2">
           <button
@@ -176,22 +239,37 @@ export function ReviewCard({ review }: { review: Review }) {
                           </Link>
                           <span className="text-muted-foreground">{comment.date}</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void handleCommentLike(comment.id);
-                          }}
-                          disabled={commentLikeTargetId === comment.id}
-                          className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 font-medium transition-colors ${
-                            comment.currentUserLiked
-                              ? "border-primary/50 bg-primary/10 text-foreground"
-                              : "border-border text-muted-foreground hover:text-foreground"
-                          } disabled:cursor-not-allowed disabled:opacity-60`}
-                          aria-label="Like comment"
-                        >
-                          <Heart className="h-3 w-3" />
-                          {comment.likesCount}
-                        </button>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handleCommentLike(comment.id);
+                            }}
+                            disabled={commentLikeTargetId === comment.id}
+                            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-medium transition-colors ${
+                              comment.currentUserLiked
+                                ? "border-primary/50 bg-primary/10 text-foreground"
+                                : "border-border text-muted-foreground hover:text-foreground"
+                            } disabled:cursor-not-allowed disabled:opacity-60`}
+                            aria-label="Like comment"
+                          >
+                            <Heart className="h-3 w-3" />
+                            {comment.likesCount}
+                          </button>
+                          {user?.id === comment.userId && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handleCommentDelete(comment.id);
+                              }}
+                              disabled={deletingCommentId === comment.id}
+                              className="inline-flex items-center gap-1 text-muted-foreground transition-colors hover:text-destructive disabled:cursor-not-allowed disabled:opacity-60"
+                              aria-label="Delete comment"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <p className="mt-1 text-sm text-secondary-foreground whitespace-pre-wrap break-words">
                         {comment.text}
@@ -207,6 +285,10 @@ export function ReviewCard({ review }: { review: Review }) {
             <div className="mt-3 border-t border-border pt-3">
               {!isAuthenticated ? (
                 <p className="text-xs text-muted-foreground">Sign in to reply to this review.</p>
+              ) : comments.length >= MAX_REVIEW_COMMENTS ? (
+                <p className="text-xs text-muted-foreground">
+                  This review already has the maximum of {MAX_REVIEW_COMMENTS} comments.
+                </p>
               ) : (
                 <>
                   <textarea

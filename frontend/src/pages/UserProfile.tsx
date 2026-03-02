@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Calendar, Heart, Mic2, Star, UserPlus, Users } from "lucide-react";
+import { ArrowLeft, Calendar, Heart, Mic2, Star, UserPlus, Users, X } from "lucide-react";
 import { PROFILE_COLORS } from "@/data/mockData";
 import { ReviewCard } from "@/components/ReviewCard";
 import { useReviewStore } from "@/stores/reviewStore";
@@ -24,6 +24,7 @@ export default function UserProfile() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isUpdatingFriendship, setIsUpdatingFriendship] = useState(false);
+  const [isAvatarLightboxOpen, setIsAvatarLightboxOpen] = useState(false);
 
   useEffect(() => {
     if (!id) {
@@ -158,12 +159,19 @@ export default function UserProfile() {
         </Link>
 
         <div className="flex items-end gap-6 mt-2">
-          <img
-            src={profileUser.avatarUrl}
-            alt={profileUser.displayName}
-            className="h-24 w-24 rounded-full ring-4 ring-background border-4 border-background"
-            style={profileTheme.avatar}
-          />
+          <button
+            type="button"
+            onClick={() => setIsAvatarLightboxOpen(true)}
+            className="shrink-0 rounded-full transition-transform hover:scale-[1.02]"
+            aria-label="Open profile picture"
+          >
+            <img
+              src={profileUser.avatarUrl}
+              alt={profileUser.displayName}
+              className="h-24 w-24 rounded-full ring-4 ring-background border-4 border-background object-cover"
+              style={profileTheme.avatar}
+            />
+          </button>
           <div className="flex-1 pb-2">
             <div className="flex flex-wrap items-center gap-3">
               <h1 className="font-display text-3xl font-bold">{profileUser.displayName}</h1>
@@ -390,6 +398,29 @@ export default function UserProfile() {
           )}
         </section>
       </div>
+
+      {isAvatarLightboxOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-6 backdrop-blur-sm"
+          onClick={() => setIsAvatarLightboxOpen(false)}
+        >
+          <button
+            type="button"
+            onClick={() => setIsAvatarLightboxOpen(false)}
+            className="absolute right-6 top-6 inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background/70 text-foreground transition-colors hover:bg-background"
+            style={profileTheme.subtlePanel}
+            aria-label="Close profile picture"
+          >
+            <X className="h-4 w-4" />
+          </button>
+          <img
+            src={profileUser.avatarUrl}
+            alt={profileUser.displayName}
+            className="max-h-[85vh] max-w-[85vw] rounded-3xl object-contain shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }

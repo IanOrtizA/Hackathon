@@ -3,7 +3,7 @@ import { useReviewStore } from "@/stores/reviewStore";
 import { TasteMatchCard } from "@/components/TasteMatchCard";
 import { ReviewCard } from "@/components/ReviewCard";
 import { AlbumCard } from "@/components/AlbumCard";
-import { Search, Music, Activity, Mic2, Check, Users } from "lucide-react";
+import { Search, Music, Activity, Mic2, Check, Users, ChevronDown, ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { MatchMode, SocialUserSummary, Song } from "@/types/music";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
 const SONG_PAGE_SIZE = 5;
+const NETWORK_PREVIEW_COUNT = 2;
 
 const matchTabs: { mode: MatchMode; label: string; icon: typeof Music; description: string }[] = [
   { mode: "top5", label: "Top 5", icon: Music, description: "Based on shared Top 5 songs" },
@@ -35,6 +36,9 @@ export default function Discover() {
   const [isLoadingNetwork, setIsLoadingNetwork] = useState(false);
   const [networkError, setNetworkError] = useState<string | null>(null);
   const [acceptingRequestUserId, setAcceptingRequestUserId] = useState<string | null>(null);
+  const [showAllFriends, setShowAllFriends] = useState(false);
+  const [showAllRequests, setShowAllRequests] = useState(false);
+  const [isNetworkOpen, setIsNetworkOpen] = useState(true);
 
   const matches = getTasteMatches(matchMode);
   const searchQuery = search.trim();
@@ -199,15 +203,52 @@ export default function Discover() {
   }
 
   const hasMoreSongs = searchedSongs.length > 0 && searchedSongs.length < songTotalCount;
+  const visibleFriends = showAllFriends ? friends : friends.slice(0, NETWORK_PREVIEW_COUNT);
+  const visibleIncomingRequests = showAllRequests
+    ? incomingRequests
+    : incomingRequests.slice(0, NETWORK_PREVIEW_COUNT);
+  const hasMoreFriends = friends.length > NETWORK_PREVIEW_COUNT;
+  const hasMoreIncomingRequests = incomingRequests.length > NETWORK_PREVIEW_COUNT;
 
   return (
     <div className="container py-10 max-w-5xl">
-      <section className="mb-10">
-        <div className="mb-4">
-          <h2 className="font-display text-2xl font-bold">Your Friends</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Friends and incoming requests live here.</p>
+      <div className="sticky top-20 z-20 mb-10 rounded-2xl border border-border/70 bg-background/90 p-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="relative">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Search albums, songs, artists..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded-xl border border-border bg-card px-12 py-3.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+          />
         </div>
-        {!isAuthenticated ? (
+      </div>
+
+      <section className="mb-10">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="font-display text-2xl font-bold">Your Friends</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Friends and incoming requests live here.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsNetworkOpen((current) => !current)}
+            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary/40 hover:text-foreground"
+          >
+            {isNetworkOpen ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+            {isNetworkOpen ? "Hide" : "Show"}
+          </button>
+        </div>
+        {!isNetworkOpen ? (
+          <div className="rounded-xl border border-dashed border-border bg-card/40 p-5 text-sm text-muted-foreground">
+            Friend activity is hidden.
+          </div>
+        ) : !isAuthenticated ? (
           <div className="rounded-xl border border-dashed border-border bg-card/40 p-5 text-sm text-muted-foreground">
             Sign in to manage your friends and accept requests.
           </div>
@@ -227,21 +268,32 @@ export default function Discover() {
                 <h3 className="text-sm font-semibold">Friends</h3>
               </div>
               {friends.length > 0 ? (
-                <div className="grid gap-3">
-                  {friends.map((friend) => (
-                    <Link
-                      key={friend.id}
-                      to={`/user/${friend.id}`}
-                      className="flex items-center gap-3 rounded-lg border border-border/70 px-3 py-2 transition-colors hover:bg-secondary/30"
+                <>
+                  <div className="grid gap-3">
+                    {visibleFriends.map((friend) => (
+                      <Link
+                        key={friend.id}
+                        to={`/user/${friend.id}`}
+                        className="flex items-center gap-3 rounded-lg border border-border/70 px-3 py-2 transition-colors hover:bg-secondary/30"
+                      >
+                        <img src={friend.avatarUrl} alt={friend.displayName} className="h-10 w-10 rounded-full object-cover" />
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">{friend.displayName}</p>
+                          <p className="truncate text-xs text-muted-foreground">@{friend.username}</p>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                  {hasMoreFriends && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllFriends((current) => !current)}
+                      className="mt-3 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
                     >
-                      <img src={friend.avatarUrl} alt={friend.displayName} className="h-10 w-10 rounded-full object-cover" />
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">{friend.displayName}</p>
-                        <p className="truncate text-xs text-muted-foreground">@{friend.username}</p>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
+                      {showAllFriends ? "Show Less" : "View More"}
+                    </button>
+                  )}
+                </>
               ) : (
                 <p className="text-sm text-muted-foreground">You have no friends yet.</p>
               )}
@@ -253,32 +305,43 @@ export default function Discover() {
                 <h3 className="text-sm font-semibold">Friend Requests</h3>
               </div>
               {incomingRequests.length > 0 ? (
-                <div className="grid gap-3">
-                  {incomingRequests.map((request) => (
-                    <div
-                      key={request.id}
-                      className="flex items-center justify-between gap-3 rounded-lg border border-border/70 px-3 py-2"
-                    >
-                      <Link to={`/user/${request.id}`} className="flex min-w-0 items-center gap-3">
-                        <img src={request.avatarUrl} alt={request.displayName} className="h-10 w-10 rounded-full object-cover" />
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">{request.displayName}</p>
-                          <p className="truncate text-xs text-muted-foreground">@{request.username}</p>
-                        </div>
-                      </Link>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void handleAcceptFriendRequest(request.id);
-                        }}
-                        disabled={acceptingRequestUserId === request.id}
-                        className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-secondary/40 disabled:cursor-not-allowed disabled:opacity-60"
+                <>
+                  <div className="grid gap-3">
+                    {visibleIncomingRequests.map((request) => (
+                      <div
+                        key={request.id}
+                        className="flex items-center justify-between gap-3 rounded-lg border border-border/70 px-3 py-2"
                       >
-                        Accept
-                      </button>
-                    </div>
-                  ))}
-                </div>
+                        <Link to={`/user/${request.id}`} className="flex min-w-0 items-center gap-3">
+                          <img src={request.avatarUrl} alt={request.displayName} className="h-10 w-10 rounded-full object-cover" />
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{request.displayName}</p>
+                            <p className="truncate text-xs text-muted-foreground">@{request.username}</p>
+                          </div>
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleAcceptFriendRequest(request.id);
+                          }}
+                          disabled={acceptingRequestUserId === request.id}
+                          className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-secondary/40 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Accept
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  {hasMoreIncomingRequests && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllRequests((current) => !current)}
+                      className="mt-3 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      {showAllRequests ? "Show Less" : "View More"}
+                    </button>
+                  )}
+                </>
               ) : (
                 <p className="text-sm text-muted-foreground">No pending friend requests.</p>
               )}
@@ -286,18 +349,6 @@ export default function Discover() {
           </div>
         )}
       </section>
-
-      {/* Search */}
-      <div className="relative mb-10">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-        <input
-          type="text"
-          placeholder="Search albums, songs, artists..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full rounded-xl border border-border bg-card px-12 py-3.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
-        />
-      </div>
 
       {/* Search results */}
       {searchQuery && (

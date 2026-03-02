@@ -11,7 +11,12 @@ export interface ProfileAreaTheme {
 export function getProfileAreaTheme(colorValue: string): ProfileAreaTheme {
   return {
     page: {
+      minHeight: "100dvh",
+      backgroundColor: "hsl(var(--background))",
       backgroundImage: `linear-gradient(180deg, hsl(${colorValue} / 0.14), transparent 30%)`,
+      backgroundRepeat: "no-repeat",
+      backgroundSize: "100% 100%",
+      backgroundAttachment: "fixed",
     },
     banner: {
       backgroundImage: [
@@ -19,6 +24,8 @@ export function getProfileAreaTheme(colorValue: string): ProfileAreaTheme {
         `radial-gradient(circle at 84% 0%, hsl(${colorValue} / 0.7), transparent 30%)`,
         `linear-gradient(135deg, hsl(${colorValue} / 0.96), hsl(${colorValue} / 0.44))`,
       ].join(", "),
+      backgroundRepeat: "no-repeat",
+      backgroundSize: "cover",
       boxShadow: `inset 0 -52px 72px hsl(var(--background) / 0.3)`,
     },
     panel: {
