@@ -1,22 +1,25 @@
 import { useParams, Link } from "react-router-dom";
 import { allSongs, albums } from "@/data/mockData";
-import { RatingStars } from "@/components/RatingStars";
 import { ReviewForm } from "@/components/ReviewForm";
 import { PreviewClipButton } from "@/components/PreviewClipButton";
+import { ReviewCard } from "@/components/ReviewCard";
 import { useReviewStore } from "@/stores/reviewStore";
-import { ArrowLeft, Clock, ExternalLink, Music } from "lucide-react";
+import { ArrowLeft, Clock, ExternalLink, Heart, Music } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Song } from "@/types/music";
 import { apiUrl } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
 
 export default function SongDetail() {
   const { id } = useParams();
   const fallbackSong = useMemo(() => allSongs.find((s) => s.id === id), [id]);
-  const [userRating, setUserRating] = useState(0);
   const [song, setSong] = useState<Song | null>(fallbackSong ?? null);
   const [isLoadingSong, setIsLoadingSong] = useState(false);
   const [songError, setSongError] = useState<string | null>(null);
+  const [isUpdatingLikedSong, setIsUpdatingLikedSong] = useState(false);
   const reviews = useReviewStore((s) => s.reviews);
+  const { user, isAuthenticated, updateProfile } = useAuth();
 
   useEffect(() => {
     if (!id) {
@@ -91,6 +94,31 @@ export default function SongDetail() {
   const album = albums.find((a) => a.id === song.albumId);
   const hasLocalAlbum = Boolean(album);
   const songReviews = reviews.filter((r) => r.songId === song.id);
+  const likedSongs = user?.likedSongs || [];
+  const isSongLiked = likedSongs.some((likedSong) => likedSong.id === song.id);
+
+  async function handleToggleLikedSong() {
+    if (!isAuthenticated || !user) {
+      toast.error("Sign in to like songs.");
+      return;
+    }
+
+    const nextLikedSongs = isSongLiked
+      ? likedSongs.filter((likedSong) => likedSong.id !== song.id)
+      : [song, ...likedSongs.filter((likedSong) => likedSong.id !== song.id)];
+
+    try {
+      setIsUpdatingLikedSong(true);
+      await updateProfile({
+        likedSongs: nextLikedSongs,
+      });
+      toast.success(isSongLiked ? "Removed from liked songs." : "Added to liked songs.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update liked songs.");
+    } finally {
+      setIsUpdatingLikedSong(false);
+    }
+  }
 
   return (
     <div className="container py-10 max-w-4xl">
@@ -132,6 +160,21 @@ export default function SongDetail() {
           </div>
 
           <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                void handleToggleLikedSong();
+              }}
+              disabled={isUpdatingLikedSong}
+              className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                isSongLiked
+                  ? "border-primary/40 bg-primary/10 text-foreground"
+                  : "border-border hover:bg-secondary/50"
+              } disabled:cursor-not-allowed disabled:opacity-60`}
+            >
+              <Heart className={`h-4 w-4 ${isSongLiked ? "fill-current" : ""}`} />
+              {isSongLiked ? "Liked" : "Like Song"}
+            </button>
             {song.previewUrl && (
               <PreviewClipButton previewUrl={song.previewUrl} />
             )}
@@ -153,18 +196,10 @@ export default function SongDetail() {
             </p>
           )}
 
-          {/* User rating */}
-          <div className="mt-6 rounded-xl bg-card border border-border p-4">
-            <p className="text-sm font-medium mb-2">Your rating</p>
-            <RatingStars rating={userRating} size="lg" interactive onRate={setUserRating} />
-            {userRating > 0 && (
-              <p className="text-xs text-muted-foreground mt-2">You rated this {userRating}/5</p>
-            )}
-          </div>
         </div>
       </div>
 
-      {/* Write Review */}
+      {/* Rate and Review */}
       <section className="mt-10">
         <ReviewForm
           albumId={song.albumId}
@@ -180,21 +215,7 @@ export default function SongDetail() {
         <section className="mt-8 pb-10">
           <h2 className="font-display text-xl font-bold mb-4">Reviews for {song.title} ({songReviews.length})</h2>
           <div className="grid gap-4">
-            {songReviews.map((r) => (
-              <div key={r.id} className="flex gap-4 rounded-xl bg-card p-4 border border-border">
-                <Link to={`/user/${r.userId}`}>
-                  <img src={r.avatarUrl} alt={r.username} className="h-10 w-10 rounded-full" />
-                </Link>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <Link to={`/user/${r.userId}`} className="text-sm font-semibold hover:text-primary transition-colors">{r.username}</Link>
-                    <RatingStars rating={r.rating} size="sm" />
-                  </div>
-                  <p className="text-sm text-secondary-foreground mt-1">{r.text}</p>
-                  <p className="text-xs text-muted-foreground mt-1">{r.date}</p>
-                </div>
-              </div>
-            ))}
+            {songReviews.map((r) => <ReviewCard key={r.id} review={r} />)}
           </div>
         </section>
       )}

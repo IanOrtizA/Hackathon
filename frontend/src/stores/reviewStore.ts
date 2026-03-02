@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { Review } from "@/types/music";
+import { Review, ReviewComment } from "@/types/music";
 import { apiUrl } from "@/lib/api";
 
 interface ReviewFilters {
@@ -19,12 +19,45 @@ interface CreateReviewInput {
   text: string;
 }
 
+type ReviewReaction = "like" | "dislike" | null;
+
 interface ReviewStore {
   reviews: Review[];
   isLoading: boolean;
   error: string | null;
-  loadReviews: (filters?: ReviewFilters) => Promise<Review[]>;
+  loadReviews: (filters?: ReviewFilters, authToken?: string | null) => Promise<Review[]>;
   addReview: (review: CreateReviewInput, authToken: string) => Promise<Review>;
+  reactToReview: (reviewId: string, reaction: ReviewReaction, authToken: string) => Promise<Review>;
+  addComment: (reviewId: string, text: string, authToken: string) => Promise<Review>;
+  toggleCommentLike: (reviewId: string, commentId: string, authToken: string) => Promise<Review>;
+}
+
+function normalizeReviewComment(comment: ReviewComment): ReviewComment {
+  return {
+    ...comment,
+    likesCount: typeof comment.likesCount === "number" ? comment.likesCount : 0,
+    popularityScore: typeof comment.popularityScore === "number"
+      ? comment.popularityScore
+      : (typeof comment.likesCount === "number" ? comment.likesCount : 0),
+    currentUserLiked: Boolean(comment.currentUserLiked),
+  };
+}
+
+function normalizeReview(review: Review): Review {
+  const currentUserReaction =
+    review.currentUserReaction === "like" || review.currentUserReaction === "dislike"
+      ? review.currentUserReaction
+      : null;
+
+  return {
+    ...review,
+    likesCount: typeof review.likesCount === "number" ? review.likesCount : 0,
+    dislikesCount: typeof review.dislikesCount === "number" ? review.dislikesCount : 0,
+    currentUserReaction,
+    comments: Array.isArray(review.comments)
+      ? review.comments.map((comment) => normalizeReviewComment(comment))
+      : [],
+  };
 }
 
 function buildReviewQuery(filters?: ReviewFilters) {
@@ -58,7 +91,7 @@ export const useReviewStore = create<ReviewStore>((set) => ({
   reviews: [],
   isLoading: false,
   error: null,
-  loadReviews: async (filters) => {
+  loadReviews: async (filters, authToken) => {
     const shouldHydrateGlobalState = !filters || Object.keys(filters).length === 0;
 
     if (shouldHydrateGlobalState) {
@@ -66,14 +99,22 @@ export const useReviewStore = create<ReviewStore>((set) => ({
     }
 
     try {
-      const response = await fetch(apiUrl(`/api/reviews${buildReviewQuery(filters)}`));
+      const requestHeaders: HeadersInit = {};
+
+      if (authToken) {
+        requestHeaders.Authorization = `Bearer ${authToken}`;
+      }
+
+      const response = await fetch(apiUrl(`/api/reviews${buildReviewQuery(filters)}`), {
+        headers: requestHeaders,
+      });
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
         throw new Error(typeof data?.error === "string" ? data.error : "Failed to fetch reviews.");
       }
 
-      const reviews = Array.isArray(data.reviews) ? data.reviews : [];
+      const reviews = Array.isArray(data.reviews) ? data.reviews.map((review) => normalizeReview(review as Review)) : [];
 
       if (shouldHydrateGlobalState) {
         set({ reviews, isLoading: false, error: null });
@@ -106,7 +147,7 @@ export const useReviewStore = create<ReviewStore>((set) => ({
       throw new Error(typeof data?.error === "string" ? data.error : "Failed to save review.");
     }
 
-    const createdReview = data.review as Review;
+    const createdReview = normalizeReview(data.review as Review);
 
     set((state) => ({
       reviews: [createdReview, ...state.reviews],
@@ -114,5 +155,84 @@ export const useReviewStore = create<ReviewStore>((set) => ({
     }));
 
     return createdReview;
+  },
+  reactToReview: async (reviewId, reaction, authToken) => {
+    const response = await fetch(apiUrl(`/api/reviews/${encodeURIComponent(reviewId)}/reaction`), {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ reaction }),
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(typeof data?.error === "string" ? data.error : "Failed to update review reaction.");
+    }
+
+    const updatedReview = normalizeReview(data.review as Review);
+
+    set((state) => ({
+      reviews: state.reviews.map((review) => (
+        review.id === updatedReview.id ? updatedReview : review
+      )),
+      error: null,
+    }));
+
+    return updatedReview;
+  },
+  addComment: async (reviewId, text, authToken) => {
+    const response = await fetch(apiUrl(`/api/reviews/${encodeURIComponent(reviewId)}/comments`), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ text }),
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(typeof data?.error === "string" ? data.error : "Failed to add comment.");
+    }
+
+    const updatedReview = normalizeReview(data.review as Review);
+
+    set((state) => ({
+      reviews: state.reviews.map((review) => (
+        review.id === updatedReview.id ? updatedReview : review
+      )),
+      error: null,
+    }));
+
+    return updatedReview;
+  },
+  toggleCommentLike: async (reviewId, commentId, authToken) => {
+    const response = await fetch(
+      apiUrl(`/api/reviews/${encodeURIComponent(reviewId)}/comments/${encodeURIComponent(commentId)}/like`),
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      }
+    );
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(typeof data?.error === "string" ? data.error : "Failed to update comment like.");
+    }
+
+    const updatedReview = normalizeReview(data.review as Review);
+
+    set((state) => ({
+      reviews: state.reviews.map((review) => (
+        review.id === updatedReview.id ? updatedReview : review
+      )),
+      error: null,
+    }));
+
+    return updatedReview;
   },
 }));

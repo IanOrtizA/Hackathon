@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { AuthenticatedUser } from "@/types/music";
+import { AuthenticatedUser, SocialUserSummary, Song } from "@/types/music";
 import { apiUrl } from "@/lib/api";
 
 const AUTH_TOKEN_STORAGE_KEY = "musicbox.auth.token";
@@ -33,7 +33,10 @@ interface ProfileUpdateInput {
   displayName?: string;
   avatarUrl?: string;
   profileColor?: string | null;
+  favoriteSongs?: Song[];
   favoriteArtists?: string[];
+  likedSongs?: Song[];
+  likedArtists?: string[];
 }
 
 interface AuthContextValue {
@@ -46,6 +49,9 @@ interface AuthContextValue {
   logout: () => void;
   refreshUser: () => Promise<void>;
   updateProfile: (updates: ProfileUpdateInput) => Promise<void>;
+  sendFriendRequest: (targetUserId: string) => Promise<void>;
+  acceptFriendRequest: (requesterUserId: string) => Promise<void>;
+  loadFriendNetwork: () => Promise<{ friends: SocialUserSummary[]; incomingRequests: SocialUserSummary[] }>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -166,6 +172,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data.user);
   }, [token]);
 
+  const sendFriendRequest = useCallback(async (targetUserId: string) => {
+    if (!token) {
+      throw new Error("Not authenticated.");
+    }
+
+    const response = await fetch(apiUrl(`/api/users/${encodeURIComponent(targetUserId)}/friend-request`), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const data = await readJsonResponse<{ user: AuthenticatedUser }>(response);
+
+    setUser(data.user);
+  }, [token]);
+
+  const acceptFriendRequest = useCallback(async (requesterUserId: string) => {
+    if (!token) {
+      throw new Error("Not authenticated.");
+    }
+
+    const response = await fetch(apiUrl(`/api/users/${encodeURIComponent(requesterUserId)}/friend-accept`), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const data = await readJsonResponse<{ user: AuthenticatedUser }>(response);
+
+    setUser(data.user);
+  }, [token]);
+
+  const loadFriendNetwork = useCallback(async () => {
+    if (!token) {
+      throw new Error("Not authenticated.");
+    }
+
+    const response = await fetch(apiUrl("/api/auth/network"), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    return readJsonResponse<{ friends: SocialUserSummary[]; incomingRequests: SocialUserSummary[] }>(response);
+  }, [token]);
+
   const value = useMemo<AuthContextValue>(() => ({
     user,
     token,
@@ -176,7 +228,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     logout,
     refreshUser,
     updateProfile,
-  }), [isLoading, login, logout, refreshUser, register, token, updateProfile, user]);
+    sendFriendRequest,
+    acceptFriendRequest,
+    loadFriendNetwork,
+  }), [
+    acceptFriendRequest,
+    isLoading,
+    loadFriendNetwork,
+    login,
+    logout,
+    refreshUser,
+    register,
+    sendFriendRequest,
+    token,
+    updateProfile,
+    user,
+  ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

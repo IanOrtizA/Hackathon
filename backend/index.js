@@ -1,21 +1,31 @@
-require('dotenv').config();
 const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware (Lets frontend talk to backend, and allows us to read JSON data)
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 
 // --- DATABASE SETUP ---
 // Connect to MongoDB
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('✅ Connected to MongoDB!'))
   .catch((err) => console.error('❌ MongoDB connection error:', err));
+
+const reviewCommentSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  username: { type: String, required: true },
+  avatarUrl: { type: String, default: '/placeholder.svg' },
+  text: { type: String, required: true },
+  likedBy: { type: [String], default: [] },
+  date: { type: Date, default: Date.now },
+});
 
 // Create a "Blueprint" for what a Review should look like
 const reviewSchema = new mongoose.Schema({
@@ -29,6 +39,9 @@ const reviewSchema = new mongoose.Schema({
   avatarUrl: { type: String, default: '/placeholder.svg' },
   rating: { type: Number, required: true },
   text: { type: String, required: true },
+  likedBy: { type: [String], default: [] },
+  dislikedBy: { type: [String], default: [] },
+  comments: { type: [reviewCommentSchema], default: [] },
   date: { type: Date, default: Date.now }
 });
 
@@ -55,7 +68,13 @@ const userSchema = new mongoose.Schema({
   passwordSalt: { type: String, required: true },
   avatarUrl: { type: String, default: '/placeholder.svg' },
   topFive: { type: [songSnapshotSchema], default: [] },
+  favoriteSongs: { type: [songSnapshotSchema], default: [] },
   favoriteArtists: { type: [String], default: [] },
+  likedSongs: { type: [songSnapshotSchema], default: [] },
+  likedArtists: { type: [String], default: [] },
+  friendIds: { type: [String], default: [] },
+  incomingFriendRequestIds: { type: [String], default: [] },
+  outgoingFriendRequestIds: { type: [String], default: [] },
   recentAlbumIds: { type: [String], default: [] },
   totalRatings: { type: Number, default: 0 },
   joinedDate: { type: Date, default: Date.now },
@@ -166,7 +185,13 @@ function sanitizeUser(user) {
     displayName: user.displayName,
     avatarUrl: user.avatarUrl,
     topFive: user.topFive,
-    favoriteArtists: user.favoriteArtists,
+    favoriteSongs: user.favoriteSongs || [],
+    favoriteArtists: user.favoriteArtists || [],
+    likedSongs: user.likedSongs || [],
+    likedArtists: user.likedArtists || [],
+    friendIds: user.friendIds || [],
+    incomingFriendRequestIds: user.incomingFriendRequestIds || [],
+    outgoingFriendRequestIds: user.outgoingFriendRequestIds || [],
     recentAlbumIds: user.recentAlbumIds,
     totalRatings: user.totalRatings,
     joinedDate: user.joinedDate ? user.joinedDate.toISOString() : null,
@@ -174,7 +199,53 @@ function sanitizeUser(user) {
   };
 }
 
-function sanitizeReview(review) {
+function sanitizeUserSummary(user) {
+  return {
+    id: user._id.toString(),
+    username: user.username,
+    displayName: user.displayName,
+    avatarUrl: user.avatarUrl,
+    profileColor: user.profileColor,
+  };
+}
+
+function getOptionalAuthUserId(req) {
+  const token = getTokenFromRequest(req);
+  const payload = readAuthToken(token);
+
+  return payload?.userId ? String(payload.userId) : null;
+}
+
+function sanitizeReviewComment(comment, viewerUserId = null) {
+  const likedBy = Array.isArray(comment.likedBy) ? comment.likedBy : [];
+
+  return {
+    id: comment._id.toString(),
+    userId: comment.userId,
+    username: comment.username,
+    avatarUrl: comment.avatarUrl,
+    text: comment.text,
+    likesCount: likedBy.length,
+    popularityScore: likedBy.length,
+    currentUserLiked: viewerUserId ? likedBy.includes(viewerUserId) : false,
+    date: comment.date ? comment.date.toISOString().split('T')[0] : null,
+  };
+}
+
+function sanitizeReview(review, viewerUserId = null) {
+  const likedBy = Array.isArray(review.likedBy) ? review.likedBy : [];
+  const dislikedBy = Array.isArray(review.dislikedBy) ? review.dislikedBy : [];
+  const comments = Array.isArray(review.comments) ? review.comments : [];
+  let currentUserReaction = null;
+
+  if (viewerUserId) {
+    if (likedBy.includes(viewerUserId)) {
+      currentUserReaction = 'like';
+    } else if (dislikedBy.includes(viewerUserId)) {
+      currentUserReaction = 'dislike';
+    }
+  }
+
   return {
     id: review._id.toString(),
     userId: review.userId,
@@ -187,6 +258,10 @@ function sanitizeReview(review) {
     artist: review.artist,
     rating: review.rating,
     text: review.text,
+    likesCount: likedBy.length,
+    dislikesCount: dislikedBy.length,
+    currentUserReaction,
+    comments: comments.map((comment) => sanitizeReviewComment(comment, viewerUserId)),
     date: review.date ? review.date.toISOString().split('T')[0] : null,
   };
 }
@@ -574,9 +649,142 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
   });
 });
 
+app.get('/api/auth/network', requireAuth, async (req, res) => {
+  try {
+    const friendIds = Array.isArray(req.authUser.friendIds) ? req.authUser.friendIds : [];
+    const incomingFriendRequestIds = Array.isArray(req.authUser.incomingFriendRequestIds)
+      ? req.authUser.incomingFriendRequestIds
+      : [];
+
+    const [friendUsers, incomingRequestUsers] = await Promise.all([
+      friendIds.length > 0 ? User.find({ _id: { $in: friendIds } }) : [],
+      incomingFriendRequestIds.length > 0 ? User.find({ _id: { $in: incomingFriendRequestIds } }) : [],
+    ]);
+
+    const friendMap = new Map(friendUsers.map((user) => [user._id.toString(), user]));
+    const requestMap = new Map(incomingRequestUsers.map((user) => [user._id.toString(), user]));
+
+    return res.json({
+      friends: friendIds
+        .map((id) => friendMap.get(id))
+        .filter(Boolean)
+        .map((user) => sanitizeUserSummary(user)),
+      incomingRequests: incomingFriendRequestIds
+        .map((id) => requestMap.get(id))
+        .filter(Boolean)
+        .map((user) => sanitizeUserSummary(user)),
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to load friend network.' });
+  }
+});
+
+app.post('/api/users/:id/friend-request', requireAuth, async (req, res) => {
+  const targetUserId = String(req.params.id || '').trim();
+  const authUserId = req.authUser._id.toString();
+
+  if (!targetUserId || targetUserId === authUserId) {
+    return res.status(400).json({ error: 'Choose a different user.' });
+  }
+
+  try {
+    const targetUser = await User.findById(targetUserId);
+
+    if (!targetUser) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    const friendIds = Array.isArray(req.authUser.friendIds) ? req.authUser.friendIds : [];
+    const incomingFriendRequestIds = Array.isArray(req.authUser.incomingFriendRequestIds)
+      ? req.authUser.incomingFriendRequestIds
+      : [];
+    const outgoingFriendRequestIds = Array.isArray(req.authUser.outgoingFriendRequestIds)
+      ? req.authUser.outgoingFriendRequestIds
+      : [];
+
+    if (friendIds.includes(targetUserId)) {
+      return res.json({ user: sanitizeUser(req.authUser) });
+    }
+
+    if (incomingFriendRequestIds.includes(targetUserId)) {
+      return res.status(409).json({ error: 'This user already sent you a request. Accept it instead.' });
+    }
+
+    if (outgoingFriendRequestIds.includes(targetUserId)) {
+      return res.json({ user: sanitizeUser(req.authUser) });
+    }
+
+    req.authUser.outgoingFriendRequestIds = [...outgoingFriendRequestIds, targetUserId];
+
+    const targetIncoming = Array.isArray(targetUser.incomingFriendRequestIds)
+      ? targetUser.incomingFriendRequestIds
+      : [];
+    targetUser.incomingFriendRequestIds = targetIncoming.includes(authUserId)
+      ? targetIncoming
+      : [...targetIncoming, authUserId];
+
+    await Promise.all([req.authUser.save(), targetUser.save()]);
+
+    return res.json({
+      user: sanitizeUser(req.authUser),
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to send friend request.' });
+  }
+});
+
+app.post('/api/users/:id/friend-accept', requireAuth, async (req, res) => {
+  const requesterUserId = String(req.params.id || '').trim();
+  const authUserId = req.authUser._id.toString();
+
+  if (!requesterUserId || requesterUserId === authUserId) {
+    return res.status(400).json({ error: 'Choose a different user.' });
+  }
+
+  try {
+    const requesterUser = await User.findById(requesterUserId);
+
+    if (!requesterUser) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    const incomingFriendRequestIds = Array.isArray(req.authUser.incomingFriendRequestIds)
+      ? req.authUser.incomingFriendRequestIds
+      : [];
+
+    if (!incomingFriendRequestIds.includes(requesterUserId)) {
+      return res.status(400).json({ error: 'No friend request from this user.' });
+    }
+
+    const currentFriendIds = Array.isArray(req.authUser.friendIds) ? req.authUser.friendIds : [];
+    req.authUser.incomingFriendRequestIds = incomingFriendRequestIds.filter((id) => id !== requesterUserId);
+    req.authUser.friendIds = currentFriendIds.includes(requesterUserId)
+      ? currentFriendIds
+      : [...currentFriendIds, requesterUserId];
+
+    const requesterOutgoing = Array.isArray(requesterUser.outgoingFriendRequestIds)
+      ? requesterUser.outgoingFriendRequestIds
+      : [];
+    const requesterFriends = Array.isArray(requesterUser.friendIds) ? requesterUser.friendIds : [];
+    requesterUser.outgoingFriendRequestIds = requesterOutgoing.filter((id) => id !== authUserId);
+    requesterUser.friendIds = requesterFriends.includes(authUserId)
+      ? requesterFriends
+      : [...requesterFriends, authUserId];
+
+    await Promise.all([req.authUser.save(), requesterUser.save()]);
+
+    return res.json({
+      user: sanitizeUser(req.authUser),
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to accept friend request.' });
+  }
+});
+
 app.patch('/api/auth/profile', requireAuth, async (req, res) => {
   const updates = {};
-  const { displayName, avatarUrl, profileColor, favoriteArtists, topFive } = req.body;
+  const MAX_FAVORITE_SONGS = 4;
+  const { displayName, avatarUrl, profileColor, favoriteArtists, favoriteSongs, likedSongs, likedArtists, topFive } = req.body;
 
   if (typeof displayName === 'string' && displayName.trim()) {
     updates.displayName = displayName.trim();
@@ -596,6 +804,45 @@ app.patch('/api/auth/profile', requireAuth, async (req, res) => {
 
   if (Array.isArray(topFive)) {
     updates.topFive = topFive.slice(0, 5);
+  }
+
+  if (Array.isArray(likedSongs)) {
+    const nextLikedSongs = likedSongs.filter((song) => song && typeof song === 'object');
+    const nextLikedArtists = [...new Set(
+      nextLikedSongs
+        .map((song) => (typeof song.artist === 'string' ? song.artist.trim() : ''))
+        .filter(Boolean)
+    )];
+    const nextLikedSongIds = new Set(
+      nextLikedSongs
+        .map((song) => (typeof song.id === 'string' ? song.id : ''))
+        .filter(Boolean)
+    );
+    const currentFavoriteSongs = Array.isArray(req.authUser.favoriteSongs) ? req.authUser.favoriteSongs : [];
+    const nextFavoriteSongs = currentFavoriteSongs
+      .filter((song) => song && typeof song === 'object' && typeof song.id === 'string' && nextLikedSongIds.has(song.id))
+      .slice(0, MAX_FAVORITE_SONGS);
+
+    updates.likedSongs = nextLikedSongs;
+    updates.likedArtists = nextLikedArtists;
+    updates.favoriteSongs = nextFavoriteSongs;
+  } else if (Array.isArray(likedArtists)) {
+    updates.likedArtists = likedArtists.filter((artist) => typeof artist === 'string');
+  }
+
+  if (Array.isArray(favoriteSongs)) {
+    const sourceLikedSongs = Array.isArray(updates.likedSongs)
+      ? updates.likedSongs
+      : (Array.isArray(req.authUser.likedSongs) ? req.authUser.likedSongs : []);
+    const likedSongIds = new Set(
+      sourceLikedSongs
+        .map((song) => (song && typeof song === 'object' && typeof song.id === 'string' ? song.id : ''))
+        .filter(Boolean)
+    );
+
+    updates.favoriteSongs = favoriteSongs
+      .filter((song) => song && typeof song === 'object' && typeof song.id === 'string' && likedSongIds.has(song.id))
+      .slice(0, MAX_FAVORITE_SONGS);
   }
 
   try {
@@ -756,6 +1003,7 @@ app.get('/api/tracks/:id', async (req, res) => {
 
 app.get('/api/reviews', async (req, res) => {
   const filters = {};
+  const viewerUserId = getOptionalAuthUserId(req);
   const albumId = String(req.query.albumId || '').trim();
   const songId = String(req.query.songId || '').trim();
   const userId = String(req.query.userId || '').trim();
@@ -779,7 +1027,7 @@ app.get('/api/reviews', async (req, res) => {
       .limit(limit);
 
     return res.json({
-      reviews: reviews.map(sanitizeReview),
+      reviews: reviews.map((review) => sanitizeReview(review, viewerUserId)),
     });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to fetch reviews' });
@@ -814,10 +1062,131 @@ app.post('/api/reviews', requireAuth, async (req, res) => {
     });
 
     return res.status(201).json({
-      review: sanitizeReview(newReview),
+      review: sanitizeReview(newReview, req.authUser._id.toString()),
     });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to save review' });
+  }
+});
+
+app.patch('/api/reviews/:id/reaction', requireAuth, async (req, res) => {
+  const reviewId = String(req.params.id || '').trim();
+  const reaction = typeof req.body.reaction === 'string'
+    ? req.body.reaction.trim().toLowerCase()
+    : null;
+
+  if (!reviewId) {
+    return res.status(400).json({ error: 'Review id is required.' });
+  }
+
+  if (reaction !== null && reaction !== 'like' && reaction !== 'dislike') {
+    return res.status(400).json({ error: 'Reaction must be like, dislike, or null.' });
+  }
+
+  try {
+    const review = await Review.findById(reviewId);
+
+    if (!review) {
+      return res.status(404).json({ error: 'Review not found.' });
+    }
+
+    const authUserId = req.authUser._id.toString();
+    const likedBy = (Array.isArray(review.likedBy) ? review.likedBy : []).filter((id) => id !== authUserId);
+    const dislikedBy = (Array.isArray(review.dislikedBy) ? review.dislikedBy : []).filter((id) => id !== authUserId);
+
+    if (reaction === 'like') {
+      likedBy.push(authUserId);
+    } else if (reaction === 'dislike') {
+      dislikedBy.push(authUserId);
+    }
+
+    review.likedBy = likedBy;
+    review.dislikedBy = dislikedBy;
+    await review.save();
+
+    return res.json({
+      review: sanitizeReview(review, authUserId),
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to update review reaction.' });
+  }
+});
+
+app.post('/api/reviews/:id/comments', requireAuth, async (req, res) => {
+  const reviewId = String(req.params.id || '').trim();
+  const text = String(req.body.text || '').trim();
+
+  if (!reviewId) {
+    return res.status(400).json({ error: 'Review id is required.' });
+  }
+
+  if (!text) {
+    return res.status(400).json({ error: 'Comment text is required.' });
+  }
+
+  if (text.length > 300) {
+    return res.status(400).json({ error: 'Comments must be 300 characters or fewer.' });
+  }
+
+  try {
+    const review = await Review.findById(reviewId);
+
+    if (!review) {
+      return res.status(404).json({ error: 'Review not found.' });
+    }
+
+    review.comments.push({
+      userId: req.authUser._id.toString(),
+      username: req.authUser.username,
+      avatarUrl: req.authUser.avatarUrl,
+      text,
+    });
+    await review.save();
+
+    return res.status(201).json({
+      review: sanitizeReview(review, req.authUser._id.toString()),
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to add comment.' });
+  }
+});
+
+app.patch('/api/reviews/:reviewId/comments/:commentId/like', requireAuth, async (req, res) => {
+  const reviewId = String(req.params.reviewId || '').trim();
+  const commentId = String(req.params.commentId || '').trim();
+
+  if (!reviewId || !commentId) {
+    return res.status(400).json({ error: 'Review id and comment id are required.' });
+  }
+
+  try {
+    const review = await Review.findById(reviewId);
+
+    if (!review) {
+      return res.status(404).json({ error: 'Review not found.' });
+    }
+
+    const comment = review.comments.id(commentId);
+
+    if (!comment) {
+      return res.status(404).json({ error: 'Comment not found.' });
+    }
+
+    const authUserId = req.authUser._id.toString();
+    const likedBy = Array.isArray(comment.likedBy) ? comment.likedBy : [];
+    const hasLiked = likedBy.includes(authUserId);
+
+    comment.likedBy = hasLiked
+      ? likedBy.filter((id) => id !== authUserId)
+      : [...likedBy, authUserId];
+
+    await review.save();
+
+    return res.json({
+      review: sanitizeReview(review, authUserId),
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to update comment like.' });
   }
 });
 

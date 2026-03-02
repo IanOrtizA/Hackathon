@@ -37,7 +37,13 @@ export interface UserProfile {
   displayName: string;
   avatarUrl: string;
   topFive: Song[];
+  favoriteSongs: Song[];
   favoriteArtists: string[];
+  likedSongs: Song[];
+  likedArtists: string[];
+  friendIds: string[];
+  incomingFriendRequestIds: string[];
+  outgoingFriendRequestIds: string[];
   recentAlbumIds: string[];
   totalRatings: number;
   joinedDate: string | null;
@@ -46,6 +52,14 @@ export interface UserProfile {
 
 export interface AuthenticatedUser extends UserProfile {
   email: string;
+}
+
+export interface SocialUserSummary {
+  id: string;
+  username: string;
+  displayName: string;
+  avatarUrl: string;
+  profileColor?: string | null;
 }
 
 export type MatchMode = "top5" | "activity" | "artists";
@@ -57,6 +71,18 @@ export interface TasteMatch {
   sharedAlbums?: string[];
   sharedArtists?: string[];
   mode: MatchMode;
+}
+
+export interface ReviewComment {
+  id: string;
+  userId: string;
+  username: string;
+  avatarUrl: string;
+  text: string;
+  likesCount: number;
+  popularityScore: number;
+  currentUserLiked: boolean;
+  date: string;
 }
 
 export interface Review {
@@ -71,5 +97,9 @@ export interface Review {
   artist: string;
   rating: number;
   text: string;
+  likesCount: number;
+  dislikesCount: number;
+  currentUserReaction: "like" | "dislike" | null;
+  comments: ReviewComment[];
   date: string;
 }

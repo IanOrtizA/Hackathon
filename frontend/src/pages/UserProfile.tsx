@@ -1,20 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Calendar, Mic2, Star } from "lucide-react";
+import { ArrowLeft, Calendar, Heart, Mic2, Star, UserPlus, Users } from "lucide-react";
 import { PROFILE_COLORS } from "@/data/mockData";
 import { ReviewCard } from "@/components/ReviewCard";
 import { useReviewStore } from "@/stores/reviewStore";
 import { useAuth } from "@/contexts/AuthContext";
 import { AuthenticatedUser } from "@/types/music";
 import { apiUrl } from "@/lib/api";
+import { getProfileAreaTheme } from "@/lib/profileTheme";
+import { toast } from "sonner";
 
 export default function UserProfile() {
+  const LIKED_SONG_PREVIEW_COUNT = 5;
   const { id } = useParams();
-  const { user: authUser } = useAuth();
+  const {
+    user: authUser,
+    isAuthenticated,
+    sendFriendRequest,
+    acceptFriendRequest,
+  } = useAuth();
   const reviews = useReviewStore((state) => state.reviews);
   const [profileUser, setProfileUser] = useState<AuthenticatedUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isUpdatingFriendship, setIsUpdatingFriendship] = useState(false);
 
   useEffect(() => {
     if (!id) {
@@ -91,12 +100,52 @@ export default function UserProfile() {
   const joinedLabel = profileUser.joinedDate
     ? new Date(profileUser.joinedDate).toLocaleDateString("en-US", { month: "long", year: "numeric" })
     : "Pending sync";
+  const likedSongs = profileUser.likedSongs || [];
+  const favoriteSongIds = new Set((profileUser.favoriteSongs || []).map((song) => song.id));
+  const favoriteSongs = likedSongs.filter((song) => favoriteSongIds.has(song.id));
+  const likedArtists = profileUser.likedArtists || [];
+  const likedSongPreview = likedSongs.slice(0, LIKED_SONG_PREVIEW_COUNT);
+  const hasMoreLikedSongs = likedSongs.length > LIKED_SONG_PREVIEW_COUNT;
+  const activeProfileColor = profileUser.profileColor || PROFILE_COLORS[0].value;
+  const profileTheme = getProfileAreaTheme(activeProfileColor);
+  const accentStyle = { color: `hsl(${activeProfileColor})` };
+  const isOwnProfile = authUser?.id === profileUser.id;
+  const friendIds = authUser?.friendIds || [];
+  const incomingFriendRequestIds = authUser?.incomingFriendRequestIds || [];
+  const outgoingFriendRequestIds = authUser?.outgoingFriendRequestIds || [];
+  const isFriend = friendIds.includes(profileUser.id);
+  const hasIncomingRequest = incomingFriendRequestIds.includes(profileUser.id);
+  const hasOutgoingRequest = outgoingFriendRequestIds.includes(profileUser.id);
+
+  async function handleSendFriendRequest() {
+    try {
+      setIsUpdatingFriendship(true);
+      await sendFriendRequest(profileUser.id);
+      toast.success("Friend request sent.");
+    } catch (friendError) {
+      toast.error(friendError instanceof Error ? friendError.message : "Failed to send friend request.");
+    } finally {
+      setIsUpdatingFriendship(false);
+    }
+  }
+
+  async function handleAcceptFriendRequest() {
+    try {
+      setIsUpdatingFriendship(true);
+      await acceptFriendRequest(profileUser.id);
+      toast.success("Friend request accepted.");
+    } catch (friendError) {
+      toast.error(friendError instanceof Error ? friendError.message : "Failed to accept friend request.");
+    } finally {
+      setIsUpdatingFriendship(false);
+    }
+  }
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen" style={profileTheme.page}>
       <div
         className="h-36 relative transition-colors duration-500"
-        style={{ backgroundColor: `hsl(${profileUser.profileColor || PROFILE_COLORS[0].value})` }}
+        style={profileTheme.banner}
       >
         <div className="absolute inset-0 bg-gradient-to-b from-transparent to-background" />
       </div>
@@ -111,13 +160,63 @@ export default function UserProfile() {
             src={profileUser.avatarUrl}
             alt={profileUser.displayName}
             className="h-24 w-24 rounded-full ring-4 ring-background border-4 border-background"
+            style={profileTheme.avatar}
           />
           <div className="flex-1 pb-2">
-            <h1 className="font-display text-3xl font-bold">{profileUser.displayName}</h1>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="font-display text-3xl font-bold">{profileUser.displayName}</h1>
+              {!isOwnProfile && isAuthenticated && (
+                <>
+                  {hasIncomingRequest ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleAcceptFriendRequest();
+                      }}
+                      disabled={isUpdatingFriendship}
+                      className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-background/70 disabled:cursor-not-allowed disabled:opacity-60"
+                      style={profileTheme.subtlePanel}
+                    >
+                      <Users className="h-4 w-4" />
+                      Accept Request
+                    </button>
+                  ) : isFriend ? (
+                    <span
+                      className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground"
+                      style={profileTheme.subtlePanel}
+                    >
+                      <Users className="h-4 w-4" />
+                      Friends
+                    </span>
+                  ) : hasOutgoingRequest ? (
+                    <span
+                      className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground"
+                      style={profileTheme.subtlePanel}
+                    >
+                      <UserPlus className="h-4 w-4" />
+                      Request Sent
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleSendFriendRequest();
+                      }}
+                      disabled={isUpdatingFriendship}
+                      className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-background/70 disabled:cursor-not-allowed disabled:opacity-60"
+                      style={profileTheme.subtlePanel}
+                    >
+                      <UserPlus className="h-4 w-4" />
+                      Add Friend
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
             <p className="text-muted-foreground">@{profileUser.username}</p>
             <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
               <span className="flex items-center gap-1.5">
-                <Star className="h-4 w-4 text-primary" />
+                <Star className="h-4 w-4" style={accentStyle} />
                 {profileUser.totalRatings} ratings
               </span>
               <span className="flex items-center gap-1.5">
@@ -130,20 +229,115 @@ export default function UserProfile() {
 
         <section className="mt-8">
           <h2 className="font-display text-2xl font-bold mb-4 flex items-center gap-2">
-            <Mic2 className="h-5 w-5 text-primary" />
-            Favorite Artists
+            <Star className="h-5 w-5" style={accentStyle} />
+            Favorite Songs
           </h2>
-          {profileUser.favoriteArtists.length > 0 ? (
+          {favoriteSongs.length > 0 ? (
+            <div className="grid gap-3">
+              {favoriteSongs.map((song) => (
+                <div
+                  key={song.id}
+                  className="flex items-center gap-4 rounded-xl bg-card border border-border p-4"
+                  style={profileTheme.panel}
+                >
+                  <Link to={`/song/${song.id}`}>
+                    <img src={song.coverUrl} alt={song.albumTitle} className="h-14 w-14 rounded-lg object-cover" />
+                  </Link>
+                  <div className="min-w-0 flex-1">
+                    <Link to={`/song/${song.id}`} className="block truncate font-semibold hover:text-primary transition-colors">
+                      {song.title}
+                    </Link>
+                    <p className="truncate text-sm text-muted-foreground">{song.artist} · {song.albumTitle}</p>
+                  </div>
+                  <Star className="h-4 w-4 fill-current" style={accentStyle} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p
+              className="rounded-xl border border-dashed border-border bg-card/40 p-4 text-sm text-muted-foreground"
+              style={profileTheme.subtlePanel}
+            >
+              {isOwnProfile
+                ? "Pick up to 4 songs from your liked songs list to feature them here."
+                : "This user has not featured any favorite songs yet."}
+            </p>
+          )}
+        </section>
+
+        <section className="mt-10">
+          <h2 className="font-display text-2xl font-bold mb-4 flex items-center gap-2">
+            <Heart className="h-5 w-5" style={accentStyle} />
+            Liked Songs
+          </h2>
+          {likedSongs.length > 0 ? (
+            <>
+              <div className="grid gap-3">
+                {likedSongPreview.map((song) => (
+                  <div
+                    key={song.id}
+                    className="flex items-center gap-4 rounded-xl bg-card border border-border p-4"
+                    style={profileTheme.panel}
+                  >
+                    <Link to={`/song/${song.id}`}>
+                      <img src={song.coverUrl} alt={song.albumTitle} className="h-14 w-14 rounded-lg object-cover" />
+                    </Link>
+                    <div className="min-w-0 flex-1">
+                      <Link to={`/song/${song.id}`} className="block truncate font-semibold hover:text-primary transition-colors">
+                        {song.title}
+                      </Link>
+                      <p className="truncate text-sm text-muted-foreground">{song.artist} · {song.albumTitle}</p>
+                    </div>
+                    {favoriteSongIds.has(song.id) && (
+                      <Star className="h-4 w-4 shrink-0 fill-current" style={accentStyle} />
+                    )}
+                    <span className="text-xs text-muted-foreground">{song.duration}</span>
+                  </div>
+                ))}
+              </div>
+              {hasMoreLikedSongs && (
+                <Link
+                  to={`/user/${profileUser.id}/liked-songs`}
+                  className="mt-4 inline-flex rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-background/60"
+                  style={profileTheme.subtlePanel}
+                >
+                  View More Songs
+                </Link>
+              )}
+            </>
+          ) : (
+            <p
+              className="rounded-xl border border-dashed border-border bg-card/40 p-4 text-sm text-muted-foreground"
+              style={profileTheme.subtlePanel}
+            >
+              This user has not liked any songs yet.
+            </p>
+          )}
+        </section>
+
+        <section className="mt-10">
+          <h2 className="font-display text-2xl font-bold mb-4 flex items-center gap-2">
+            <Mic2 className="h-5 w-5" style={accentStyle} />
+            Liked Artists
+          </h2>
+          {likedArtists.length > 0 ? (
             <div className="flex flex-wrap gap-3">
-              {profileUser.favoriteArtists.map((artist) => (
-                <div key={artist} className="rounded-xl bg-card border border-border px-4 py-3 text-sm font-medium card-hover">
+              {likedArtists.map((artist) => (
+                <div
+                  key={artist}
+                  className="rounded-xl bg-card border border-border px-4 py-3 text-sm font-medium card-hover"
+                  style={profileTheme.panel}
+                >
                   {artist}
                 </div>
               ))}
             </div>
           ) : (
-            <p className="rounded-xl border border-dashed border-border bg-card/40 p-4 text-sm text-muted-foreground">
-              This user has not added favorite artists yet.
+            <p
+              className="rounded-xl border border-dashed border-border bg-card/40 p-4 text-sm text-muted-foreground"
+              style={profileTheme.subtlePanel}
+            >
+              Liked artists will appear here once this user hearts songs.
             </p>
           )}
         </section>
@@ -156,8 +350,9 @@ export default function UserProfile() {
                 <div
                   key={song.id}
                   className="flex items-center gap-4 rounded-xl bg-card border border-border p-4"
+                  style={profileTheme.panel}
                 >
-                  <span className="font-display text-3xl font-bold text-primary w-8 text-center">{index + 1}</span>
+                  <span className="font-display text-3xl font-bold w-8 text-center" style={accentStyle}>{index + 1}</span>
                   <img src={song.coverUrl} alt={song.albumTitle} className="h-14 w-14 rounded-lg object-cover" />
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold truncate">{song.title}</p>
@@ -168,7 +363,10 @@ export default function UserProfile() {
               ))}
             </div>
           ) : (
-            <p className="rounded-xl border border-dashed border-border bg-card/40 p-4 text-sm text-muted-foreground">
+            <p
+              className="rounded-xl border border-dashed border-border bg-card/40 p-4 text-sm text-muted-foreground"
+              style={profileTheme.subtlePanel}
+            >
               Top songs will appear after this user saves them.
             </p>
           )}

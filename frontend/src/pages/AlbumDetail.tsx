@@ -5,12 +5,10 @@ import { ReviewCard } from "@/components/ReviewCard";
 import { ReviewForm } from "@/components/ReviewForm";
 import { useReviewStore } from "@/stores/reviewStore";
 import { ArrowLeft, Clock } from "lucide-react";
-import { useState } from "react";
 
 export default function AlbumDetail() {
   const { id } = useParams();
   const album = albums.find((a) => a.id === id);
-  const [userRating, setUserRating] = useState(0);
   const reviews = useReviewStore((s) => s.reviews);
   const albumReviews = reviews.filter((r) => r.albumId === id && !r.songId);
 
@@ -47,15 +45,6 @@ export default function AlbumDetail() {
             <span className="text-lg font-semibold">{album.avgRating.toFixed(1)}</span>
             <span className="text-sm text-muted-foreground">({album.totalRatings.toLocaleString()} ratings)</span>
           </div>
-
-          {/* User rating */}
-          <div className="mt-6 rounded-xl bg-card border border-border p-4">
-            <p className="text-sm font-medium mb-2">Your rating</p>
-            <RatingStars rating={userRating} size="lg" interactive onRate={setUserRating} />
-            {userRating > 0 && (
-              <p className="text-xs text-muted-foreground mt-2">You rated this {userRating}/5</p>
-            )}
-          </div>
         </div>
       </div>
 
@@ -82,7 +71,7 @@ export default function AlbumDetail() {
         </div>
       </section>
 
-      {/* Write Review */}
+      {/* Rate and Review */}
       <section className="mt-10">
         <ReviewForm
           albumId={album.id}

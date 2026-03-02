@@ -83,7 +83,6 @@ const Index = () => {
         <div className="mb-6 flex items-end justify-between gap-4">
           <div>
             <h2 className="font-display text-2xl font-bold">Trending Albums</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Spotify US market defaults</p>
           </div>
         </div>
         {isLoadingTrending ? (
@@ -136,7 +135,6 @@ const Index = () => {
         <div className="mb-6 flex items-end justify-between gap-4">
           <div>
             <h2 className="font-display text-2xl font-bold">Trending Songs</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Spotify US market defaults</p>
           </div>
         </div>
         {isLoadingTrending ? (

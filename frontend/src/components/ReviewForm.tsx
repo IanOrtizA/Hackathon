@@ -56,7 +56,7 @@ export function ReviewForm({ albumId, songId, albumTitle, albumCover, artist }: 
 
   return (
     <div className="rounded-xl bg-card border border-border p-5">
-      <h3 className="font-semibold text-sm mb-3">Write a Review</h3>
+      <h3 className="font-semibold text-sm mb-3">Rate and Review</h3>
 
       {!isAuthenticated && (
         <div className="mb-4 rounded-lg border border-dashed border-border bg-background/50 p-4 text-sm text-muted-foreground">
@@ -70,6 +70,7 @@ export function ReviewForm({ albumId, songId, albumTitle, albumCover, artist }: 
       <div className="mb-4">
         <p className="text-xs text-muted-foreground mb-1.5">Rating</p>
         <RatingStars rating={rating} size="lg" interactive={isAuthenticated} onRate={setRating} />
+        <p className="mt-2 text-xs text-muted-foreground">Your rating is submitted with this review.</p>
       </div>
 
       <div className="mb-3">
