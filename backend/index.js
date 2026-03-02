@@ -61,6 +61,44 @@ const songSnapshotSchema = new mongoose.Schema({
   spotifyUrl: { type: String, default: null },
 }, { _id: false });
 
+const userReviewSnapshotSchema = new mongoose.Schema({
+  reviewId: { type: String, required: true },
+  songId: { type: String, default: null },
+  albumId: { type: String, required: true },
+  albumTitle: { type: String, default: '' },
+  albumCover: { type: String, default: '' },
+  artist: { type: String, default: '' },
+  rating: { type: Number, default: 0 },
+  text: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
+}, { _id: false });
+
+const userReviewReactionSchema = new mongoose.Schema({
+  reviewId: { type: String, required: true },
+  songId: { type: String, default: null },
+  albumId: { type: String, required: true },
+  reaction: { type: String, enum: ['like', 'dislike'], required: true },
+  updatedAt: { type: Date, default: Date.now },
+}, { _id: false });
+
+const userCommentSnapshotSchema = new mongoose.Schema({
+  reviewId: { type: String, required: true },
+  commentId: { type: String, required: true },
+  songId: { type: String, default: null },
+  albumId: { type: String, required: true },
+  text: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now },
+}, { _id: false });
+
+const userCommentLikeSchema = new mongoose.Schema({
+  reviewId: { type: String, required: true },
+  commentId: { type: String, required: true },
+  songId: { type: String, default: null },
+  albumId: { type: String, required: true },
+  updatedAt: { type: Date, default: Date.now },
+}, { _id: false });
+
 const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
   username: { type: String, required: true, unique: true, trim: true },
@@ -73,6 +111,10 @@ const userSchema = new mongoose.Schema({
   favoriteArtists: { type: [String], default: [] },
   likedSongs: { type: [songSnapshotSchema], default: [] },
   likedArtists: { type: [String], default: [] },
+  reviewHistory: { type: [userReviewSnapshotSchema], default: [] },
+  reviewReactionHistory: { type: [userReviewReactionSchema], default: [] },
+  commentHistory: { type: [userCommentSnapshotSchema], default: [] },
+  commentLikeHistory: { type: [userCommentLikeSchema], default: [] },
   friendIds: { type: [String], default: [] },
   incomingFriendRequestIds: { type: [String], default: [] },
   outgoingFriendRequestIds: { type: [String], default: [] },
@@ -84,6 +126,490 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema);
 
+const songAggregateSchema = new mongoose.Schema({
+  songId: { type: String, required: true, unique: true, index: true },
+  title: { type: String, default: '' },
+  artist: { type: String, default: '' },
+  albumId: { type: String, default: '' },
+  albumTitle: { type: String, default: '' },
+  coverUrl: { type: String, default: '' },
+  duration: { type: String, default: '' },
+  previewUrl: { type: String, default: null },
+  spotifyUrl: { type: String, default: null },
+  avgEmbedding: { type: [Number], default: [] },
+  genreWeights: { type: Map, of: Number, default: {} },
+  reviewCount: { type: Number, default: 0 },
+  avgRating: { type: Number, default: 0 },
+  likedByUserIds: { type: [String], default: [] },
+  updatedAt: { type: Date, default: Date.now },
+});
+
+const SongAggregate = mongoose.model('SongAggregate', songAggregateSchema);
+
+function normalizeSongSnapshotInput(value) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const id = typeof value.id === 'string' ? value.id.trim() : '';
+  const title = typeof value.title === 'string' ? value.title.trim() : '';
+  const artist = typeof value.artist === 'string' ? value.artist.trim() : '';
+  const albumId = typeof value.albumId === 'string' ? value.albumId.trim() : '';
+  const albumTitle = typeof value.albumTitle === 'string' ? value.albumTitle.trim() : '';
+
+  if (!id || !title || !artist || !albumId || !albumTitle) {
+    return null;
+  }
+
+  return {
+    id,
+    title,
+    artist,
+    albumId,
+    albumTitle,
+    coverUrl: typeof value.coverUrl === 'string' ? value.coverUrl.trim() : '',
+    duration: typeof value.duration === 'string' ? value.duration.trim() : '',
+    previewUrl: typeof value.previewUrl === 'string' && value.previewUrl.trim() ? value.previewUrl.trim() : null,
+    spotifyUrl: typeof value.spotifyUrl === 'string' && value.spotifyUrl.trim() ? value.spotifyUrl.trim() : null,
+  };
+}
+
+function createUserReviewSnapshot(review) {
+  return {
+    reviewId: review._id.toString(),
+    songId: review.songId || null,
+    albumId: review.albumId,
+    albumTitle: review.albumTitle || '',
+    albumCover: review.albumCover || '',
+    artist: review.artist || '',
+    rating: Number(review.rating) || 0,
+    text: review.text || '',
+    createdAt: review.date || new Date(),
+    updatedAt: review.updatedAt || review.date || new Date(),
+  };
+}
+
+function createUserReviewReactionSnapshot(review, reaction) {
+  return {
+    reviewId: review._id.toString(),
+    songId: review.songId || null,
+    albumId: review.albumId,
+    reaction,
+    updatedAt: new Date(),
+  };
+}
+
+function createUserCommentSnapshot(review, comment) {
+  return {
+    reviewId: review._id.toString(),
+    commentId: comment._id.toString(),
+    songId: review.songId || null,
+    albumId: review.albumId,
+    text: comment.text || '',
+    createdAt: comment.date || new Date(),
+  };
+}
+
+function createUserCommentLikeSnapshot(review, commentId) {
+  return {
+    reviewId: review._id.toString(),
+    commentId,
+    songId: review.songId || null,
+    albumId: review.albumId,
+    updatedAt: new Date(),
+  };
+}
+
+function upsertActivityEntry(entries, key, nextEntry) {
+  const safeEntries = Array.isArray(entries) ? entries : [];
+  return [
+    nextEntry,
+    ...safeEntries.filter((entry) => entry && entry[key] !== nextEntry[key]),
+  ];
+}
+
+function removeActivityEntry(entries, key, value) {
+  const safeEntries = Array.isArray(entries) ? entries : [];
+  return safeEntries.filter((entry) => entry && entry[key] !== value);
+}
+
+async function rebuildUserActivitySnapshots() {
+  const users = await User.find({});
+  const userMap = new Map(users.map((user) => [user._id.toString(), user]));
+
+  for (const user of users) {
+    user.reviewHistory = [];
+    user.reviewReactionHistory = [];
+    user.commentHistory = [];
+    user.commentLikeHistory = [];
+  }
+
+  const reviews = await Review.find({}).sort({ date: -1 });
+
+  for (const review of reviews) {
+    const author = userMap.get(String(review.userId || ''));
+
+    if (author) {
+      author.reviewHistory = upsertActivityEntry(author.reviewHistory, 'reviewId', createUserReviewSnapshot(review));
+    }
+
+    for (const userId of Array.isArray(review.likedBy) ? review.likedBy : []) {
+      const reactingUser = userMap.get(String(userId || ''));
+
+      if (reactingUser) {
+        reactingUser.reviewReactionHistory = upsertActivityEntry(
+          reactingUser.reviewReactionHistory,
+          'reviewId',
+          createUserReviewReactionSnapshot(review, 'like'),
+        );
+      }
+    }
+
+    for (const userId of Array.isArray(review.dislikedBy) ? review.dislikedBy : []) {
+      const reactingUser = userMap.get(String(userId || ''));
+
+      if (reactingUser) {
+        reactingUser.reviewReactionHistory = upsertActivityEntry(
+          reactingUser.reviewReactionHistory,
+          'reviewId',
+          createUserReviewReactionSnapshot(review, 'dislike'),
+        );
+      }
+    }
+
+    for (const comment of Array.isArray(review.comments) ? review.comments : []) {
+      const commentAuthor = userMap.get(String(comment.userId || ''));
+
+      if (commentAuthor && comment?._id) {
+        commentAuthor.commentHistory = upsertActivityEntry(
+          commentAuthor.commentHistory,
+          'commentId',
+          createUserCommentSnapshot(review, comment),
+        );
+      }
+
+      for (const userId of Array.isArray(comment.likedBy) ? comment.likedBy : []) {
+        const likingUser = userMap.get(String(userId || ''));
+
+        if (likingUser && comment?._id) {
+          likingUser.commentLikeHistory = upsertActivityEntry(
+            likingUser.commentLikeHistory,
+            'commentId',
+            createUserCommentLikeSnapshot(review, comment._id.toString()),
+          );
+        }
+      }
+    }
+  }
+
+  for (const user of users) {
+    user.totalRatings = Array.isArray(user.reviewHistory) ? user.reviewHistory.length : 0;
+  }
+
+  await Promise.all(users.map((user) => user.save()));
+
+  return {
+    usersSynced: users.length,
+    reviewsSynced: reviews.length,
+  };
+}
+
+// --- MATCHING SYSTEM HELPERS ---
+
+const GENRE_TAXONOMY = [
+  'pop', 'hip-hop', 'r&b', 'rock', 'indie',
+  'electronic', 'jazz', 'folk', 'metal', 'classical',
+];
+
+async function generateEmbedding(text) {
+  if (!genAI || !text) return [];
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-embedding-001' });
+    const result = await model.embedContent(text);
+    return result.embedding?.values || [];
+  } catch (error) {
+    console.error('Gemini embedding error:', error.message);
+    return [];
+  }
+}
+
+async function generateGenreTags(reviewText, artist, albumTitle) {
+  if (!genAI || !reviewText) return [];
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const prompt = `Given this music review for "${albumTitle}" by ${artist}:\n"${reviewText}"\n\nWhich of these genres apply? Pick 1-3 that best fit: ${GENRE_TAXONOMY.join(', ')}\nReply with ONLY a comma-separated list of genres from that exact list, nothing else.`;
+    const result = await model.generateContent(prompt);
+    const responseText = result.response.text().trim().toLowerCase();
+    return responseText.split(',').map(t => t.trim()).filter(t => GENRE_TAXONOMY.includes(t));
+  } catch (error) {
+    console.error('Gemini genre tag error:', error.message);
+    return [];
+  }
+}
+
+async function rebuildSongAggregate(songId) {
+  const reviews = await Review.find({ songId });
+
+  // Average embedding from reviews
+  const reviewsWithEmbeddings = reviews.filter(r => r.embedding && r.embedding.length > 0);
+  let avgEmbedding = [];
+  if (reviewsWithEmbeddings.length > 0) {
+    const dim = reviewsWithEmbeddings[0].embedding.length;
+    avgEmbedding = new Array(dim).fill(0);
+    for (const r of reviewsWithEmbeddings) {
+      for (let i = 0; i < dim; i++) {
+        avgEmbedding[i] += r.embedding[i];
+      }
+    }
+    for (let i = 0; i < dim; i++) {
+      avgEmbedding[i] /= reviewsWithEmbeddings.length;
+    }
+  }
+
+  // Genre weights from reviews
+  const genreCounts = {};
+  for (const r of reviews) {
+    for (const tag of (r.genreTags || [])) {
+      genreCounts[tag] = (genreCounts[tag] || 0) + 1;
+    }
+  }
+  const genreWeights = {};
+  const totalReviews = reviews.length || 1;
+  for (const [genre, count] of Object.entries(genreCounts)) {
+    genreWeights[genre] = count / totalReviews;
+  }
+
+  // Average rating
+  const avgRating = reviews.length > 0
+    ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
+    : 0;
+
+  // Users who liked this song
+  const usersWhoLiked = await User.find({ 'likedSongs.id': songId }, { _id: 1 });
+  const likedByUserIds = usersWhoLiked.map(u => u._id.toString());
+
+  // Get song metadata from a user's likedSongs snapshot
+  let title = '', artist = '', albumId = '', albumTitle = '', coverUrl = '', duration = '', previewUrl = null, spotifyUrl = null;
+
+  const userWithSong = await User.findOne({ 'likedSongs.id': songId });
+  if (userWithSong) {
+    const snap = (userWithSong.likedSongs || []).find(s => s.id === songId);
+    if (snap) {
+      title = snap.title || '';
+      artist = snap.artist || '';
+      albumId = snap.albumId || '';
+      albumTitle = snap.albumTitle || '';
+      coverUrl = snap.coverUrl || '';
+      duration = snap.duration || '';
+      previewUrl = snap.previewUrl || null;
+      spotifyUrl = snap.spotifyUrl || null;
+    }
+  }
+
+  // Fallback metadata from review
+  if (!title && reviews.length > 0) {
+    const r = reviews[0];
+    artist = r.artist || '';
+    albumId = r.albumId || '';
+    albumTitle = r.albumTitle || '';
+    coverUrl = r.albumCover || '';
+  }
+
+  await SongAggregate.findOneAndUpdate(
+    { songId },
+    {
+      songId, title, artist, albumId, albumTitle, coverUrl, duration, previewUrl, spotifyUrl,
+      avgEmbedding, genreWeights, reviewCount: reviews.length, avgRating, likedByUserIds,
+      updatedAt: new Date(),
+    },
+    { upsert: true, new: true }
+  );
+}
+
+async function processReviewWithGemini(reviewId) {
+  try {
+    const review = await Review.findById(reviewId);
+    if (!review || !review.text) return;
+
+    const embeddingText = `${review.artist} - ${review.albumTitle}: ${review.text}`;
+    const [embedding, genreTags] = await Promise.all([
+      generateEmbedding(embeddingText),
+      generateGenreTags(review.text, review.artist, review.albumTitle),
+    ]);
+
+    if (embedding.length > 0) review.embedding = embedding;
+    if (genreTags.length > 0) review.genreTags = genreTags;
+    await review.save();
+
+    if (review.songId) {
+      await rebuildSongAggregate(review.songId);
+    }
+  } catch (error) {
+    console.error('Review post-processing error:', error.message);
+  }
+}
+
+// --- SCORING UTILITIES ---
+
+function cosineSimilarity(a, b) {
+  if (!a || !b || a.length === 0 || b.length === 0 || a.length !== b.length) return 0;
+  let dot = 0, normA = 0, normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom === 0 ? 0 : dot / denom;
+}
+
+function jaccardWithSignificance(setA, setB) {
+  if (setA.size === 0 || setB.size === 0) return 0;
+  let overlap = 0;
+  for (const item of setA) {
+    if (setB.has(item)) overlap++;
+  }
+  const union = setA.size + setB.size - overlap;
+  if (union === 0) return 0;
+  const jaccard = overlap / union;
+  const significance = Math.min(1, overlap / 4);
+  return jaccard * significance;
+}
+
+function genreOverlap(weightsA, weightsB) {
+  if (!weightsA || !weightsB) return 0;
+  const getVal = (w, key) => (w instanceof Map ? w.get(key) : w[key]) || 0;
+  let dot = 0, normA = 0, normB = 0;
+  for (const genre of GENRE_TAXONOMY) {
+    const a = getVal(weightsA, genre);
+    const b = getVal(weightsB, genre);
+    dot += a * b;
+    normA += a * a;
+    normB += b * b;
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom === 0 ? 0 : dot / denom;
+}
+
+function artistMatchScore(artistA, artistB) {
+  if (!artistA || !artistB) return 0;
+  const normA = artistA.toLowerCase().trim();
+  const normB = artistB.toLowerCase().trim();
+  if (normA === normB) return 1.0;
+  const partsA = normA.split(/,\s*/).map(s => s.trim());
+  const partsB = normB.split(/,\s*/).map(s => s.trim());
+  for (const a of partsA) {
+    for (const b of partsB) {
+      if (a === b) return 0.4;
+    }
+  }
+  return 0;
+}
+
+function scorePair(candidate, seed) {
+  // Collaborative score
+  const seedUserSet = new Set(seed.likedByUserIds || []);
+  const candidateUserSet = new Set(candidate.likedByUserIds || []);
+  const hasCollab = seedUserSet.size > 0 || candidateUserSet.size > 0;
+  const collaborativeScore = jaccardWithSignificance(seedUserSet, candidateUserSet);
+
+  // Semantic score
+  const hasSemantic = seed.avgEmbedding?.length > 0 && candidate.avgEmbedding?.length > 0;
+  const embeddingCosine = hasSemantic ? Math.max(0, cosineSimilarity(seed.avgEmbedding, candidate.avgEmbedding)) : 0;
+  const genreJaccard = genreOverlap(seed.genreWeights, candidate.genreWeights);
+  const semanticScore = hasSemantic ? Math.min(1, 0.90 * embeddingCosine + 0.10 * genreJaccard) : 0;
+
+  // Core score (per spec)
+  let coreScore;
+  if (hasCollab && hasSemantic) {
+    coreScore = 0.65 * collaborativeScore + 0.35 * semanticScore;
+  } else if (hasCollab) {
+    coreScore = collaborativeScore;
+  } else if (hasSemantic) {
+    coreScore = semanticScore;
+  } else {
+    coreScore = 0;
+  }
+
+  // Artist and album scores
+  const artistScore = artistMatchScore(seed.artist, candidate.artist);
+  const albumScore = (seed.albumId && candidate.albumId && seed.albumId === candidate.albumId) ? 1.0 : 0.0;
+
+  // Pair score (per spec: 0.85 * core + 0.10 * artist + 0.05 * album)
+  const pairScore = 0.85 * coreScore + 0.10 * artistScore + 0.05 * albumScore;
+  return Math.min(Math.max(pairScore, 0), 1);
+}
+
+function scoreCandidate(candidate, seeds) {
+  if (seeds.length === 0) return 0;
+  if (seeds.length === 1) return scorePair(candidate, seeds[0]);
+
+  let maxPairScore = 0;
+  let supportCount = 0;
+
+  for (const seed of seeds) {
+    const ps = scorePair(candidate, seed);
+    maxPairScore = Math.max(maxPairScore, ps);
+    if (ps >= 0.45) supportCount++;
+  }
+
+  const coverageBonus = Math.min(0.10, 0.05 * Math.max(0, supportCount - 1));
+  return Math.min(1, maxPairScore + coverageBonus);
+}
+
+// --- CANDIDATE GENERATION ---
+
+async function getCollaborativeCandidates(seedSongIds, limit = 100) {
+  const users = await User.find(
+    { 'likedSongs.id': { $in: seedSongIds } },
+    { likedSongs: 1 }
+  );
+  const candidateIds = new Set();
+  for (const user of users) {
+    for (const song of (user.likedSongs || [])) {
+      if (!seedSongIds.includes(song.id)) {
+        candidateIds.add(song.id);
+      }
+    }
+  }
+  const ids = [...candidateIds].slice(0, limit);
+  return SongAggregate.find({ songId: { $in: ids } });
+}
+
+async function getSemanticCandidates(seedAggregates, seedSongIds, limit = 30) {
+  const allAggregates = await SongAggregate.find({
+    songId: { $nin: seedSongIds },
+    'avgEmbedding.0': { $exists: true },
+  });
+  const scored = new Map();
+  for (const seed of seedAggregates) {
+    if (!seed.avgEmbedding || seed.avgEmbedding.length === 0) continue;
+    for (const agg of allAggregates) {
+      const sim = cosineSimilarity(seed.avgEmbedding, agg.avgEmbedding);
+      const existing = scored.get(agg.songId);
+      if (!existing || sim > existing.score) {
+        scored.set(agg.songId, { agg, score: sim });
+      }
+    }
+  }
+  return [...scored.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(entry => entry.agg);
+}
+
+async function getMetadataCandidates(seedAggregates, seedSongIds, limit = 20) {
+  const artists = seedAggregates.map(s => s.artist).filter(Boolean);
+  const albumIds = seedAggregates.map(s => s.albumId).filter(Boolean);
+  if (artists.length === 0 && albumIds.length === 0) return [];
+  return SongAggregate.find({
+    songId: { $nin: seedSongIds },
+    $or: [
+      ...(artists.length > 0 ? [{ artist: { $in: artists } }] : []),
+      ...(albumIds.length > 0 ? [{ albumId: { $in: albumIds } }] : []),
+    ],
+  }).limit(limit);
+}
 
 // --- API ROUTES ---
 
@@ -962,11 +1488,16 @@ app.patch('/api/auth/profile', requireAuth, async (req, res) => {
   }
 
   if (Array.isArray(topFive)) {
-    updates.topFive = topFive.slice(0, 5);
+    updates.topFive = topFive
+      .map((song) => normalizeSongSnapshotInput(song))
+      .filter(Boolean)
+      .slice(0, 5);
   }
 
   if (Array.isArray(likedSongs)) {
-    const nextLikedSongs = likedSongs.filter((song) => song && typeof song === 'object');
+    const nextLikedSongs = likedSongs
+      .map((song) => normalizeSongSnapshotInput(song))
+      .filter(Boolean);
     const nextLikedArtists = [...new Set(
       nextLikedSongs
         .map((song) => (typeof song.artist === 'string' ? song.artist.trim() : ''))
@@ -1000,7 +1531,8 @@ app.patch('/api/auth/profile', requireAuth, async (req, res) => {
     );
 
     updates.favoriteSongs = favoriteSongs
-      .filter((song) => song && typeof song === 'object' && typeof song.id === 'string' && likedSongIds.has(song.id))
+      .map((song) => normalizeSongSnapshotInput(song))
+      .filter((song) => song && likedSongIds.has(song.id))
       .slice(0, MAX_FAVORITE_SONGS);
   }
 
@@ -1228,7 +1760,9 @@ app.get('/api/tracks/:id', async (req, res) => {
       track: mapSpotifyTrack(trackData),
     });
   } catch (error) {
-    res.status(500).json({ error: "Spotify track fetch failed" });
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Spotify track fetch failed',
+    });
   }
 });
 
@@ -1300,6 +1834,22 @@ app.post('/api/reviews', requireAuth, async (req, res) => {
       rating,
       text,
     });
+    req.authUser.reviewHistory = upsertActivityEntry(
+      req.authUser.reviewHistory,
+      'reviewId',
+      createUserReviewSnapshot(newReview),
+    );
+    req.authUser.totalRatings = Math.max(
+      Number(req.authUser.totalRatings) || 0,
+      Math.max((Array.isArray(req.authUser.reviewHistory) ? req.authUser.reviewHistory.length : 1) - 1, 0),
+    ) + 1;
+    await req.authUser.save();
+
+    // Fire-and-forget: process with Gemini for embedding + genre tags
+    processReviewWithGemini(newReview._id.toString()).catch(err =>
+      console.error('Background Gemini processing failed:', err.message)
+    );
+
     const authorProfileMap = await buildReviewAuthorProfileMap([newReview]);
 
     return res.status(201).json({
@@ -1420,6 +1970,15 @@ app.patch('/api/reviews/:id/reaction', requireAuth, async (req, res) => {
     await review.save();
     const authorProfileMap = await buildReviewAuthorProfileMap([review]);
 
+    req.authUser.reviewReactionHistory = reaction
+      ? upsertActivityEntry(
+          req.authUser.reviewReactionHistory,
+          'reviewId',
+          createUserReviewReactionSnapshot(review, reaction),
+        )
+      : removeActivityEntry(req.authUser.reviewReactionHistory, 'reviewId', reviewId);
+    await req.authUser.save();
+
     return res.json({
       review: sanitizeReview(review, authUserId, authorProfileMap),
     });
@@ -1463,6 +2022,17 @@ app.post('/api/reviews/:id/comments', requireAuth, async (req, res) => {
     });
     await review.save();
     const authorProfileMap = await buildReviewAuthorProfileMap([review]);
+
+    const createdComment = review.comments[review.comments.length - 1];
+
+    if (createdComment?._id) {
+      req.authUser.commentHistory = upsertActivityEntry(
+        req.authUser.commentHistory,
+        'commentId',
+        createUserCommentSnapshot(review, createdComment),
+      );
+      await req.authUser.save();
+    }
 
     return res.status(201).json({
       review: sanitizeReview(review, req.authUser._id.toString(), authorProfileMap),
@@ -1590,11 +2160,284 @@ app.patch('/api/reviews/:reviewId/comments/:commentId/like', requireAuth, async 
     await review.save();
     const authorProfileMap = await buildReviewAuthorProfileMap([review]);
 
+    req.authUser.commentLikeHistory = hasLiked
+      ? removeActivityEntry(req.authUser.commentLikeHistory, 'commentId', commentId)
+      : upsertActivityEntry(
+          req.authUser.commentLikeHistory,
+          'commentId',
+          createUserCommentLikeSnapshot(review, commentId),
+        );
+    await req.authUser.save();
+
     return res.json({
       review: sanitizeReview(review, authUserId, authorProfileMap),
     });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to update comment like.' });
+  }
+});
+
+// --- MATCHING ENDPOINTS ---
+
+app.get('/api/match/songs', async (req, res) => {
+  const songIdsParam = String(req.query.songIds || '').trim();
+  if (!songIdsParam) {
+    return res.status(400).json({ error: 'Provide at least one songId.' });
+  }
+
+  const seedSongIds = songIdsParam.split(',').map(id => id.trim()).filter(Boolean);
+  if (seedSongIds.length === 0 || seedSongIds.length > 3) {
+    return res.status(400).json({ error: 'Provide between 1 and 3 song IDs.' });
+  }
+
+  try {
+    // Ensure seed aggregates exist (build on-the-fly if missing)
+    for (const seedId of seedSongIds) {
+      const existing = await SongAggregate.findOne({ songId: seedId });
+      if (!existing) {
+        await rebuildSongAggregate(seedId);
+        // If still no aggregate, create minimal one from user likedSongs
+        const stillMissing = await SongAggregate.findOne({ songId: seedId });
+        if (!stillMissing) {
+          const userWithSong = await User.findOne({ 'likedSongs.id': seedId });
+          if (userWithSong) {
+            const snap = (userWithSong.likedSongs || []).find(s => s.id === seedId);
+            if (snap) {
+              const likedByUsers = await User.find({ 'likedSongs.id': seedId }, { _id: 1 });
+              await SongAggregate.create({
+                songId: seedId, title: snap.title || '', artist: snap.artist || '',
+                albumId: snap.albumId || '', albumTitle: snap.albumTitle || '',
+                coverUrl: snap.coverUrl || '', duration: snap.duration || '',
+                previewUrl: snap.previewUrl || null, spotifyUrl: snap.spotifyUrl || null,
+                likedByUserIds: likedByUsers.map(u => u._id.toString()),
+              });
+            }
+          }
+        }
+      }
+    }
+
+    const seedAggregates = await SongAggregate.find({ songId: { $in: seedSongIds } });
+
+    // Stage 1: Candidate generation (parallel)
+    const [collabCandidates, semanticCandidates, metadataCandidates] = await Promise.all([
+      getCollaborativeCandidates(seedSongIds, 100),
+      getSemanticCandidates(seedAggregates, seedSongIds, 30),
+      getMetadataCandidates(seedAggregates, seedSongIds, 20),
+    ]);
+
+    // Merge and deduplicate
+    const candidateMap = new Map();
+    for (const agg of [...collabCandidates, ...semanticCandidates, ...metadataCandidates]) {
+      if (!candidateMap.has(agg.songId) && !seedSongIds.includes(agg.songId)) {
+        candidateMap.set(agg.songId, agg);
+      }
+    }
+
+    // Stage 2: Score and rank
+    const scored = [];
+    for (const [, candidate] of candidateMap) {
+      const finalScore = scoreCandidate(candidate, seedAggregates);
+      const displayScore = Math.round(finalScore * 100);
+      if (displayScore >= 35) {
+        scored.push({ candidate, displayScore });
+      }
+    }
+
+    scored.sort((a, b) => b.displayScore - a.displayScore);
+    let topMatches = scored.slice(0, 20);
+
+    // Cold-start fallback: if few results, add same-artist songs
+    if (topMatches.length < 5 && seedAggregates.length > 0) {
+      const fallbackAggs = await SongAggregate.find({
+        songId: { $nin: [...seedSongIds, ...topMatches.map(m => m.candidate.songId)] },
+        artist: { $in: seedAggregates.map(s => s.artist).filter(Boolean) },
+      }).limit(10);
+      for (const agg of fallbackAggs) {
+        topMatches.push({ candidate: agg, displayScore: Math.max(35, Math.round(scorePair(agg, seedAggregates[0]) * 100)) });
+      }
+      topMatches.sort((a, b) => b.displayScore - a.displayScore);
+      topMatches = topMatches.slice(0, 20);
+    }
+
+    const matches = topMatches.map(({ candidate, displayScore }) => ({
+      id: candidate.songId,
+      title: candidate.title || candidate.albumTitle || 'Unknown',
+      artist: candidate.artist || 'Unknown',
+      albumId: candidate.albumId || '',
+      albumTitle: candidate.albumTitle || '',
+      coverUrl: candidate.coverUrl || '',
+      duration: candidate.duration || '',
+      previewUrl: candidate.previewUrl || null,
+      spotifyUrl: candidate.spotifyUrl || null,
+      similarityScore: displayScore,
+    }));
+
+    return res.json({ matches });
+  } catch (error) {
+    console.error('Match songs error:', error);
+    return res.status(500).json({ error: 'Failed to find similar songs.' });
+  }
+});
+
+app.get('/api/match/users', async (req, res) => {
+  const songIdsParam = String(req.query.songIds || '').trim();
+  if (!songIdsParam) {
+    return res.status(400).json({ error: 'Provide at least one songId.' });
+  }
+
+  const seedSongIds = songIdsParam.split(',').map(id => id.trim()).filter(Boolean);
+  if (seedSongIds.length === 0 || seedSongIds.length > 3) {
+    return res.status(400).json({ error: 'Provide between 1 and 3 song IDs.' });
+  }
+
+  try {
+    const users = await User.find({ 'likedSongs.id': { $in: seedSongIds } });
+    const matches = [];
+
+    for (const user of users) {
+      const userLikedIds = new Set((user.likedSongs || []).map(s => s.id));
+      const exactMatchedSongs = seedSongIds
+        .filter(id => userLikedIds.has(id))
+        .map(id => {
+          const snap = (user.likedSongs || []).find(s => s.id === id);
+          return snap ? {
+            id: snap.id, title: snap.title, artist: snap.artist,
+            albumId: snap.albumId, albumTitle: snap.albumTitle,
+            coverUrl: snap.coverUrl || '', duration: snap.duration || '',
+            previewUrl: snap.previewUrl || null, spotifyUrl: snap.spotifyUrl || null,
+          } : null;
+        })
+        .filter(Boolean);
+
+      const exactMatchPercentage = Math.round((exactMatchedSongs.length / seedSongIds.length) * 100);
+
+      const library = (user.likedSongs || [])
+        .filter(s => !seedSongIds.includes(s.id))
+        .slice(0, 8)
+        .map(snap => ({
+          id: snap.id, title: snap.title, artist: snap.artist,
+          albumId: snap.albumId, albumTitle: snap.albumTitle,
+          coverUrl: snap.coverUrl || '', duration: snap.duration || '',
+          previewUrl: snap.previewUrl || null, spotifyUrl: snap.spotifyUrl || null,
+        }));
+
+      matches.push({
+        user: {
+          id: user._id.toString(),
+          username: user.username,
+          displayName: user.displayName,
+          avatarUrl: user.avatarUrl,
+          totalRatings: user.totalRatings || 0,
+          profileColor: user.profileColor || null,
+        },
+        exactMatchPercentage,
+        exactMatchedSongs,
+        library,
+      });
+    }
+
+    matches.sort((a, b) => {
+      if (b.exactMatchPercentage !== a.exactMatchPercentage) {
+        return b.exactMatchPercentage - a.exactMatchPercentage;
+      }
+      return b.library.length - a.library.length;
+    });
+
+    return res.json({ matches: matches.slice(0, 20) });
+  } catch (error) {
+    console.error('Match users error:', error);
+    return res.status(500).json({ error: 'Failed to find matching users.' });
+  }
+});
+
+app.post('/api/admin/backfill-user-activity', async (req, res) => {
+  try {
+    const result = await rebuildUserActivitySnapshots();
+
+    return res.json({
+      message: `Synced ${result.usersSynced} users from ${result.reviewsSynced} reviews.`,
+    });
+  } catch (error) {
+    console.error('User activity backfill error:', error);
+    return res.status(500).json({ error: 'User activity backfill failed.' });
+  }
+});
+
+app.post('/api/admin/backfill-embeddings', async (req, res) => {
+  try {
+    // Process reviews that don't have embeddings yet
+    const reviews = await Review.find({
+      $or: [
+        { embedding: { $size: 0 } },
+        { embedding: { $exists: false } },
+      ],
+      text: { $exists: true, $ne: '' },
+    });
+
+    let processed = 0;
+    for (const review of reviews) {
+      await processReviewWithGemini(review._id.toString());
+      processed++;
+      // Small delay to avoid rate limits
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+
+    // Rebuild aggregates for all songs with reviews
+    const reviewSongIds = [...new Set(reviews.filter(r => r.songId).map(r => r.songId))];
+    for (const songId of reviewSongIds) {
+      await rebuildSongAggregate(songId);
+    }
+
+    // Build aggregates from user likedSongs
+    const users = await User.find({ 'likedSongs.0': { $exists: true } });
+    const allSongIds = new Set();
+    for (const user of users) {
+      for (const song of (user.likedSongs || [])) {
+        allSongIds.add(song.id);
+      }
+    }
+
+    let aggregatesCreated = 0;
+    for (const songId of allSongIds) {
+      const existing = await SongAggregate.findOne({ songId });
+      if (!existing) {
+        const userWithSong = await User.findOne({ 'likedSongs.id': songId });
+        if (userWithSong) {
+          const snap = (userWithSong.likedSongs || []).find(s => s.id === songId);
+          if (snap) {
+            const likedByUsers = await User.find({ 'likedSongs.id': songId }, { _id: 1 });
+            await SongAggregate.findOneAndUpdate(
+              { songId },
+              {
+                songId, title: snap.title || '', artist: snap.artist || '',
+                albumId: snap.albumId || '', albumTitle: snap.albumTitle || '',
+                coverUrl: snap.coverUrl || '', duration: snap.duration || '',
+                previewUrl: snap.previewUrl || null, spotifyUrl: snap.spotifyUrl || null,
+                likedByUserIds: likedByUsers.map(u => u._id.toString()),
+                updatedAt: new Date(),
+              },
+              { upsert: true }
+            );
+            aggregatesCreated++;
+          }
+        }
+      } else {
+        // Update likedByUserIds for existing aggregates
+        const likedByUsers = await User.find({ 'likedSongs.id': songId }, { _id: 1 });
+        existing.likedByUserIds = likedByUsers.map(u => u._id.toString());
+        await existing.save();
+      }
+    }
+
+    const userSyncResult = await rebuildUserActivitySnapshots();
+
+    return res.json({
+      message: `Processed ${processed} reviews, created/updated ${aggregatesCreated} new aggregates, synced ${allSongIds.size} total songs, and refreshed ${userSyncResult.usersSynced} user activity profiles.`,
+    });
+  } catch (error) {
+    console.error('Backfill error:', error);
+    return res.status(500).json({ error: 'Backfill failed.' });
   }
 });
 
