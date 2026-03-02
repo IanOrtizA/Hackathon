@@ -110,8 +110,10 @@ export default function LikedSongs() {
   }
 
   const likedSongs = profileUser.likedSongs || [];
-  const favoriteSongIds = new Set((profileUser.favoriteSongs || []).map((song) => song.id));
-  const favoriteSongs = likedSongs.filter((song) => favoriteSongIds.has(song.id));
+  const storedFavoriteSongs = profileUser.favoriteSongs || [];
+  const favoriteSongIds = new Set(storedFavoriteSongs.map((song) => song.id));
+  const likedSongsById = new Map(likedSongs.map((song) => [song.id, song]));
+  const favoriteSongs = storedFavoriteSongs.map((song) => likedSongsById.get(song.id) ?? song);
   const activeProfileColor = profileUser.profileColor || PROFILE_COLORS[0].value;
   const profileTheme = getProfileAreaTheme(activeProfileColor);
   const backLink = id ? `/user/${profileUser.id}` : "/profile";

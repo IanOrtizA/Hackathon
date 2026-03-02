@@ -15,6 +15,10 @@ interface TrendingAlbum {
   spotifyUrl: string | null;
 }
 
+async function readJson(response: Response) {
+  return response.json().catch(() => ({}));
+}
+
 const Index = () => {
   const reviews = useReviewStore((s) => s.reviews);
   const [trendingAlbums, setTrendingAlbums] = useState<TrendingAlbum[]>([]);
@@ -33,7 +37,7 @@ const Index = () => {
         const response = await fetch(apiUrl("/api/trending"), {
           signal: controller.signal,
         });
-        const data = await response.json().catch(() => ({}));
+        const data = await readJson(response);
 
         if (!response.ok) {
           throw new Error(typeof data?.error === "string" ? data.error : "Failed to load trending music.");
@@ -46,9 +50,44 @@ const Index = () => {
           return;
         }
 
-        setTrendingAlbums([]);
-        setTrendingSongs([]);
-        setTrendingError(error instanceof Error ? error.message : "Failed to load trending music.");
+        try {
+          const currentYear = new Date().getFullYear();
+          const [albumResponse, trackResponse] = await Promise.all([
+            fetch(apiUrl(`/api/search?q=${encodeURIComponent(`year:${currentYear}`)}&type=album&limit=6`), {
+              signal: controller.signal,
+            }),
+            fetch(apiUrl(`/api/search?q=${encodeURIComponent(`year:${currentYear}`)}&type=track&limit=8`), {
+              signal: controller.signal,
+            }),
+          ]);
+          const [albumData, trackData] = await Promise.all([
+            readJson(albumResponse),
+            readJson(trackResponse),
+          ]);
+
+          if (!albumResponse.ok || !trackResponse.ok) {
+            throw new Error("Failed to load fallback Spotify results.");
+          }
+
+          if (controller.signal.aborted) {
+            return;
+          }
+
+          setTrendingAlbums(Array.isArray(albumData.albums) ? albumData.albums : []);
+          setTrendingSongs(Array.isArray(trackData.tracks) ? trackData.tracks : []);
+        } catch (fallbackError) {
+          if (controller.signal.aborted) {
+            return;
+          }
+
+          setTrendingAlbums([]);
+          setTrendingSongs([]);
+          setTrendingError(
+            fallbackError instanceof Error
+              ? fallbackError.message
+              : (error instanceof Error ? error.message : "Failed to load trending music.")
+          );
+        }
       } finally {
         if (!controller.signal.aborted) {
           setIsLoadingTrending(false);

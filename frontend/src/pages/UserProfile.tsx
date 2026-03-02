@@ -101,8 +101,10 @@ export default function UserProfile() {
     ? new Date(profileUser.joinedDate).toLocaleDateString("en-US", { month: "long", year: "numeric" })
     : "Pending sync";
   const likedSongs = profileUser.likedSongs || [];
-  const favoriteSongIds = new Set((profileUser.favoriteSongs || []).map((song) => song.id));
-  const favoriteSongs = likedSongs.filter((song) => favoriteSongIds.has(song.id));
+  const storedFavoriteSongs = profileUser.favoriteSongs || [];
+  const favoriteSongIds = new Set(storedFavoriteSongs.map((song) => song.id));
+  const likedSongsById = new Map(likedSongs.map((song) => [song.id, song]));
+  const favoriteSongs = storedFavoriteSongs.map((song) => likedSongsById.get(song.id) ?? song);
   const likedArtists = profileUser.likedArtists || [];
   const likedSongPreview = likedSongs.slice(0, LIKED_SONG_PREVIEW_COUNT);
   const hasMoreLikedSongs = likedSongs.length > LIKED_SONG_PREVIEW_COUNT;
@@ -233,24 +235,25 @@ export default function UserProfile() {
             Favorite Songs
           </h2>
           {favoriteSongs.length > 0 ? (
-            <div className="grid gap-3">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {favoriteSongs.map((song) => (
-                <div
+                <Link
                   key={song.id}
-                  className="flex items-center gap-4 rounded-xl bg-card border border-border p-4"
+                  to={`/song/${song.id}`}
+                  className="rounded-2xl bg-card border border-border p-4 transition-transform hover:-translate-y-1"
                   style={profileTheme.panel}
                 >
-                  <Link to={`/song/${song.id}`}>
-                    <img src={song.coverUrl} alt={song.albumTitle} className="h-14 w-14 rounded-lg object-cover" />
-                  </Link>
-                  <div className="min-w-0 flex-1">
-                    <Link to={`/song/${song.id}`} className="block truncate font-semibold hover:text-primary transition-colors">
-                      {song.title}
-                    </Link>
-                    <p className="truncate text-sm text-muted-foreground">{song.artist} · {song.albumTitle}</p>
+                  <div className="relative">
+                    <img src={song.coverUrl} alt={song.albumTitle} className="aspect-square w-full rounded-xl object-cover" />
+                    <div
+                      className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-background/80 backdrop-blur-sm"
+                      style={profileTheme.subtlePanel}
+                    >
+                      <Star className="h-4 w-4 fill-current" style={accentStyle} />
+                    </div>
                   </div>
-                  <Star className="h-4 w-4 fill-current" style={accentStyle} />
-                </div>
+                  <p className="mt-3 text-base font-semibold leading-tight">{song.title}</p>
+                </Link>
               ))}
             </div>
           ) : (
@@ -323,13 +326,17 @@ export default function UserProfile() {
           {likedArtists.length > 0 ? (
             <div className="flex flex-wrap gap-3">
               {likedArtists.map((artist) => (
-                <div
+                <Link
                   key={artist}
+                  to={`/artist/${encodeURIComponent(artist)}`}
+                  state={{
+                    seededSongs: likedSongs.filter((song) => song.artist === artist),
+                  }}
                   className="rounded-xl bg-card border border-border px-4 py-3 text-sm font-medium card-hover"
                   style={profileTheme.panel}
                 >
                   {artist}
-                </div>
+                </Link>
               ))}
             </div>
           ) : (

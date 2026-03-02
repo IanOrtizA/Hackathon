@@ -318,6 +318,16 @@ function mapSpotifyAlbum(album) {
   };
 }
 
+function mapSpotifyArtist(artist) {
+  return {
+    id: artist.id,
+    name: artist.name,
+    imageUrl: artist.images?.[0]?.url || '',
+    genres: Array.isArray(artist.genres) ? artist.genres : [],
+    spotifyUrl: artist.external_urls?.spotify || null,
+  };
+}
+
 async function searchSpotifyCatalog(accessToken, {
   query,
   types,
@@ -430,6 +440,90 @@ async function findUsChartPlaylist(accessToken, query) {
 
   const exactMatch = playlists.find((playlist) => normalizeLabel(playlist.name) === normalizedQuery);
   return exactMatch || playlists[0];
+}
+
+async function findSpotifyArtist(accessToken, name) {
+  const artistSearchData = await searchSpotifyCatalog(accessToken, {
+    query: name,
+    types: ['artist'],
+    limit: 10,
+    market: 'US',
+  });
+
+  const artists = Array.isArray(artistSearchData.artists?.items)
+    ? artistSearchData.artists.items
+    : [];
+
+  if (artists.length === 0) {
+    return null;
+  }
+
+  const normalizedName = normalizeLabel(name);
+  const exactMatch = artists.find((artist) => normalizeLabel(artist.name) === normalizedName);
+  return exactMatch || artists[0];
+}
+
+async function getSpotifyArtistAlbums(accessToken, artistId, {
+  market = 'US',
+  includeGroups = 'album,single',
+} = {}) {
+  const albums = [];
+  let offset = 0;
+  let shouldContinue = true;
+
+  while (shouldContinue) {
+    const params = new URLSearchParams({
+      include_groups: includeGroups,
+      market,
+      limit: '50',
+      offset: String(offset),
+    });
+
+    const response = await fetch(`https://api.spotify.com/v1/artists/${artistId}/albums?${params.toString()}`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error('Spotify artist albums request failed');
+    }
+
+    const items = Array.isArray(data.items) ? data.items : [];
+    albums.push(...items);
+    offset += items.length;
+    shouldContinue = Boolean(data.next) && items.length > 0;
+  }
+
+  const seenReleaseKeys = new Set();
+
+  return albums.filter((album) => {
+    const dedupeKey = `${normalizeLabel(album.name)}::${album.release_date || ''}`;
+
+    if (seenReleaseKeys.has(dedupeKey)) {
+      return false;
+    }
+
+    seenReleaseKeys.add(dedupeKey);
+    return true;
+  });
+}
+
+async function getSpotifyArtistTopTracks(accessToken, artistId, {
+  market = 'US',
+} = {}) {
+  const params = new URLSearchParams({ market });
+  const response = await fetch(`https://api.spotify.com/v1/artists/${artistId}/top-tracks?${params.toString()}`, {
+    method: 'GET',
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error('Spotify artist top tracks request failed');
+  }
+
+  return Array.isArray(data.tracks) ? data.tracks : [];
 }
 
 function extractPlaylistTracks(playlistTrackData) {
@@ -973,6 +1067,39 @@ app.get('/api/trending', async (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Failed to load trending Spotify content.',
+    });
+  }
+});
+
+app.get('/api/artists/:name', async (req, res) => {
+  const artistName = decodeURIComponent(String(req.params.name || '')).trim();
+
+  if (!artistName) {
+    return res.status(400).json({ error: 'Artist name is required.' });
+  }
+
+  try {
+    const accessToken = await getSpotifyAccessToken();
+    const artist = await findSpotifyArtist(accessToken, artistName);
+
+    if (!artist?.id) {
+      return res.status(404).json({ error: 'Artist not found on Spotify.' });
+    }
+
+    const [artistAlbums, topTracks] = await Promise.all([
+      getSpotifyArtistAlbums(accessToken, artist.id, { market: 'US' }),
+      getSpotifyArtistTopTracks(accessToken, artist.id, { market: 'US' }),
+    ]);
+
+    return res.json({
+      market: 'US',
+      artist: mapSpotifyArtist(artist),
+      albums: artistAlbums.map(mapSpotifyAlbum),
+      tracks: topTracks.map(mapSpotifyTrack),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : 'Spotify artist fetch failed',
     });
   }
 });

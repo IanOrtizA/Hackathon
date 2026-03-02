@@ -6,12 +6,14 @@ import { Link } from "react-router-dom";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { Song } from "@/types/music";
 import { toast } from "sonner";
 import { getProfileAreaTheme } from "@/lib/profileTheme";
 
 const MAX_AVATAR_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_DISPLAY_NAME_LENGTH = 40;
 const LIKED_SONG_PREVIEW_COUNT = 5;
+const MAX_FAVORITE_SONGS = 4;
 
 export default function Profile() {
   const { user, isAuthenticated, isLoading, updateProfile } = useAuth();
@@ -23,14 +25,18 @@ export default function Profile() {
   const [avatarPreview, setAvatarPreview] = useState(user?.avatarUrl || "/placeholder.svg");
   const [isEditingDisplayName, setIsEditingDisplayName] = useState(false);
   const [isUpdatingDisplayName, setIsUpdatingDisplayName] = useState(false);
+  const [isUpdatingFavorites, setIsUpdatingFavorites] = useState(false);
+  const [pendingReplacementSong, setPendingReplacementSong] = useState<Song | null>(null);
   const [displayNameDraft, setDisplayNameDraft] = useState(user?.displayName || "");
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const joinedLabel = user?.joinedDate
     ? new Date(user.joinedDate).toLocaleDateString("en-US", { month: "long", year: "numeric" })
     : "Pending sync";
   const likedSongs = user?.likedSongs || [];
-  const favoriteSongIds = new Set((user?.favoriteSongs || []).map((song) => song.id));
-  const favoriteSongs = likedSongs.filter((song) => favoriteSongIds.has(song.id));
+  const storedFavoriteSongs = user?.favoriteSongs || [];
+  const favoriteSongIds = new Set(storedFavoriteSongs.map((song) => song.id));
+  const likedSongsById = new Map(likedSongs.map((song) => [song.id, song]));
+  const favoriteSongs = storedFavoriteSongs.map((song) => likedSongsById.get(song.id) ?? song);
   const likedArtists = user?.likedArtists || [];
   const likedSongPreview = likedSongs.slice(0, LIKED_SONG_PREVIEW_COUNT);
   const hasMoreLikedSongs = likedSongs.length > LIKED_SONG_PREVIEW_COUNT;
@@ -122,6 +128,59 @@ export default function Profile() {
     } finally {
       setIsUpdatingDisplayName(false);
     }
+  }
+
+  async function handleFavoriteRemove(songId: string) {
+    const nextFavoriteSongs = storedFavoriteSongs.filter((song) => song.id !== songId);
+
+    await persistFavoriteSongs(nextFavoriteSongs, "Removed from favorites.");
+  }
+
+  async function persistFavoriteSongs(nextFavoriteSongs: Song[], successMessage: string) {
+    try {
+      setIsUpdatingFavorites(true);
+      await updateProfile({ favoriteSongs: nextFavoriteSongs });
+      toast.success(successMessage);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update favorites.");
+    } finally {
+      setIsUpdatingFavorites(false);
+    }
+  }
+
+  async function handleFavoriteToggle(songId: string) {
+    const song = likedSongsById.get(songId);
+
+    if (!song) {
+      return;
+    }
+
+    const isFavorite = favoriteSongIds.has(songId);
+
+    if (!isFavorite && storedFavoriteSongs.length >= MAX_FAVORITE_SONGS) {
+      setPendingReplacementSong(song);
+      return;
+    }
+
+    const nextFavoriteSongs = isFavorite
+      ? storedFavoriteSongs.filter((entry) => entry.id !== songId)
+      : [...storedFavoriteSongs, song];
+
+    await persistFavoriteSongs(nextFavoriteSongs, isFavorite ? "Removed from favorites." : "Added to favorites.");
+  }
+
+  async function handleFavoriteReplace(replacedSongId: string) {
+    if (!pendingReplacementSong) {
+      return;
+    }
+
+    const nextFavoriteSongs = [
+      ...storedFavoriteSongs.filter((song) => song.id !== replacedSongId),
+      pendingReplacementSong,
+    ];
+
+    setPendingReplacementSong(null);
+    await persistFavoriteSongs(nextFavoriteSongs, "Favorite song replaced.");
   }
 
   if (isLoading) {
@@ -318,23 +377,34 @@ export default function Profile() {
             )}
           </div>
           {favoriteSongs.length > 0 ? (
-            <div className="grid gap-3">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {favoriteSongs.map((song) => (
                 <div
                   key={song.id}
-                  className="flex items-center gap-4 rounded-xl bg-card border border-border p-4"
+                  className="rounded-2xl bg-card border border-border p-4 transition-transform hover:-translate-y-1"
                   style={profileTheme.panel}
                 >
-                  <Link to={`/song/${song.id}`}>
-                    <img src={song.coverUrl} alt={song.albumTitle} className="h-14 w-14 rounded-lg object-cover" />
-                  </Link>
-                  <div className="min-w-0 flex-1">
-                    <Link to={`/song/${song.id}`} className="block truncate font-semibold hover:text-primary transition-colors">
-                      {song.title}
+                  <div className="relative">
+                    <Link to={`/song/${song.id}`}>
+                      <img src={song.coverUrl} alt={song.albumTitle} className="aspect-square w-full rounded-xl object-cover" />
                     </Link>
-                    <p className="truncate text-sm text-muted-foreground">{song.artist} · {song.albumTitle}</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleFavoriteRemove(song.id);
+                      }}
+                      disabled={isUpdatingFavorites}
+                      className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-background/80 backdrop-blur-sm transition-colors hover:bg-background disabled:cursor-not-allowed disabled:opacity-60"
+                      style={profileTheme.subtlePanel}
+                      aria-label="Remove from favorites"
+                      title="Remove from favorites"
+                    >
+                      <Star className="h-4 w-4 fill-current" style={accentStyle} />
+                    </button>
                   </div>
-                  <Star className="h-4 w-4 fill-current" style={accentStyle} />
+                  <Link to={`/song/${song.id}`} className="mt-3 block text-base font-semibold leading-tight hover:text-primary transition-colors">
+                    {song.title}
+                  </Link>
                 </div>
               ))}
             </div>
@@ -371,9 +441,31 @@ export default function Profile() {
                       </Link>
                       <p className="truncate text-sm text-muted-foreground">{song.artist} · {song.albumTitle}</p>
                     </div>
-                    {favoriteSongIds.has(song.id) && (
-                      <Star className="h-4 w-4 shrink-0 fill-current" style={accentStyle} />
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleFavoriteToggle(song.id);
+                      }}
+                      disabled={isUpdatingFavorites}
+                      className={cn(
+                        "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+                        favoriteSongIds.has(song.id)
+                          ? "shadow-sm"
+                          : "border-border bg-background/70 text-muted-foreground hover:text-foreground"
+                      )}
+                      style={favoriteSongIds.has(song.id)
+                        ? {
+                            backgroundColor: `hsl(${profileColor} / 0.18)`,
+                            borderColor: `hsl(${profileColor} / 0.42)`,
+                            color: `hsl(${profileColor})`,
+                            boxShadow: `0 0 0 1px hsl(${profileColor} / 0.12)`,
+                          }
+                        : profileTheme.subtlePanel}
+                      aria-label={favoriteSongIds.has(song.id) ? "Remove from favorites" : "Add to favorites"}
+                      title={favoriteSongIds.has(song.id) ? "Remove from favorites" : "Add to favorites"}
+                    >
+                      <Star className={favoriteSongIds.has(song.id) ? "h-4 w-4 fill-current" : "h-4 w-4"} />
+                    </button>
                     <span className="text-xs text-muted-foreground">{song.duration}</span>
                   </div>
                 ))}
@@ -406,13 +498,17 @@ export default function Profile() {
           {likedArtists.length > 0 ? (
             <div className="flex flex-wrap gap-3">
               {likedArtists.map((artist) => (
-                <div
+                <Link
                   key={artist}
+                  to={`/artist/${encodeURIComponent(artist)}`}
+                  state={{
+                    seededSongs: likedSongs.filter((song) => song.artist === artist),
+                  }}
                   className="rounded-xl bg-card border border-border px-4 py-3 text-sm font-medium card-hover"
                   style={profileTheme.panel}
                 >
                   {artist}
-                </div>
+                </Link>
               ))}
             </div>
           ) : (
@@ -473,6 +569,55 @@ export default function Profile() {
           )}
         </section>
       </div>
+
+      {pendingReplacementSong && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 px-4 backdrop-blur-sm">
+          <div
+            className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl"
+            style={profileTheme.panel}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium" style={accentStyle}>Favorite Limit Reached</p>
+                <h2 className="mt-1 font-display text-2xl font-bold">Replace a current favorite</h2>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  You can only keep {MAX_FAVORITE_SONGS} favorite songs. Choose one to replace with {pendingReplacementSong.title}.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPendingReplacementSong(null)}
+                className="rounded-full border border-border px-3 py-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                style={profileTheme.subtlePanel}
+              >
+                Cancel
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-3">
+              {favoriteSongs.map((song) => (
+                <button
+                  key={song.id}
+                  type="button"
+                  onClick={() => {
+                    void handleFavoriteReplace(song.id);
+                  }}
+                  disabled={isUpdatingFavorites}
+                  className="flex w-full items-center gap-4 rounded-xl border border-border bg-background/60 p-4 text-left transition-colors hover:bg-background/80 disabled:cursor-not-allowed disabled:opacity-60"
+                  style={profileTheme.subtlePanel}
+                >
+                  <img src={song.coverUrl} alt={song.albumTitle} className="h-12 w-12 rounded-lg object-cover" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-semibold">{song.title}</p>
+                    <p className="truncate text-sm text-muted-foreground">{song.artist} · {song.albumTitle}</p>
+                  </div>
+                  <span className="text-xs font-medium" style={accentStyle}>Replace</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
